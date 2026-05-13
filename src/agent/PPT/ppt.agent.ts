@@ -81,31 +81,31 @@ export type FinalPptPayload = {
 export class PptAgentService {
   private readonly logger = new Logger(PptAgentService.name);
 
- private readonly Visual = [
-  "bar_chart",
-  "line_chart",
-  "pie_chart",
-  "timeline",
-  "process_flow",
-  "comparison_table",
-  "stats_cards",
-  "infographic",
-  "architecture_diagram",
-  "growth_curve"
-];
+  private readonly Visual = [
+    'bar_chart',
+    'line_chart',
+    'pie_chart',
+    'timeline',
+    'process_flow',
+    'comparison_table',
+    'stats_cards',
+    'infographic',
+    'architecture_diagram',
+    'growth_curve',
+  ];
 
-private readonly Layouts = [
-  "hero",
-  "two_column",
-  "image_left_content_right",
-  "stats",
-  "comparison",
-  "timeline",
-  "bullet_list",
-  "quote",
-  "team_grid",
-  "cta"
-];
+  private readonly Layouts = [
+    'hero',
+    'two_column',
+    'image_left_content_right',
+    'stats',
+    'comparison',
+    'timeline',
+    'bullet_list',
+    'quote',
+    'team_grid',
+    'cta',
+  ];
 
   constructor(private readonly aiService: AiService) {}
 
