@@ -30,3 +30,26 @@ model User {
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 }
+
+model AiModelAudit {
+  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+  prompt             String
+  requestedModelName String
+  finalProvider      String
+  finalModelName     String
+  status             String
+  usedFallback       Boolean   @default(false)
+  inputTokens        Int?
+  outputTokens       Int?
+  totalTokens        Int?
+  advancedParams     Json?
+  rawUsage           Json?
+  attempts           Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([requestedModelName])
+  @@index([finalProvider])
+  @@index([status])
+  @@index([createdAt])
+}

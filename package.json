@@ -20,16 +20,22 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@ai-sdk/xai": "^3.0.89",
+    "@anthropic-ai/sdk": "^0.95.2",
+    "@aws-sdk/client-bedrock-runtime": "^3.1045.0",
+    "@google/genai": "^2.2.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/mapped-types": "*",
     "@nestjs/platform-express": "^11.0.1",
     "@prisma/client": "^6.18.0",
+    "ai": "^6.0.180",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "google-auth-library": "^10.6.2",
+    "openai": "^6.37.0",
     "prisma": "^6.18.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"

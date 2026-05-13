@@ -6,9 +6,10 @@ import { AuthModule } from './auth/auth.module';
 import { UploadModule } from './upload/upload.module';
 import { ChatModule } from './chat/chat.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { AgentModule } from './agent/agent.module';
 
 @Module({
-  imports: [PrismaModule, AiModule, AuthModule, UploadModule, ChatModule],
+  imports: [PrismaModule, AiModule, AuthModule, UploadModule, ChatModule, AgentModule],
   controllers: [AppController],
   providers: [AppService],
 })
