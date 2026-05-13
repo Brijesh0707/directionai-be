@@ -1,5 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../../ai/ai.service';
+import {
+  FinalMapPPT,
+  PptRenderMap,
+  PptTemplateService,
+  StructuredVisualData,
+} from './Templates/ppt-template.service';
+import {
+  GeneratedPptFile,
+  PptRenderService,
+} from './Templates/ppt-render.service';
 
 export type SlideBlueprint = {
   id: number;
@@ -40,6 +50,12 @@ export type SlideContentMap = {
   content: SlideContent;
 };
 
+export type SlideVisualDataMap = {
+  slideId: number;
+  visual: string;
+  data: StructuredVisualData;
+};
+
 export type IllustrationAsset = {
   slideId: number;
   visualKey: string;
@@ -74,7 +90,11 @@ export type FinalPptPayload = {
     layoutType?: string;
     visual: string;
     illustration: IllustrationAsset;
+    structuredData?: StructuredVisualData;
   }>;
+  finalMapPPT: FinalMapPPT;
+  pptRenderMap: PptRenderMap;
+  generatedPpt: GeneratedPptFile;
 };
 
 @Injectable()
@@ -107,7 +127,11 @@ export class PptAgentService {
     'cta',
   ];
 
-  constructor(private readonly aiService: AiService) {}
+  constructor(
+    private readonly aiService: AiService,
+    private readonly pptTemplateService: PptTemplateService,
+    private readonly pptRenderService: PptRenderService,
+  ) {}
 
   async runPptAgentPipeline(
     requestText: string,
@@ -116,15 +140,30 @@ export class PptAgentService {
     const categorized = await this.categorizeAndUnderstandAgent(requestText);
     const slidePlan = await this.slidePlanningAgent(categorized, inputPlan);
     const mapped = await this.slideContentMapperAgent(slidePlan, categorized);
+    const structuredVisualData = await this.visualDataExtractionAgent(
+      mapped,
+      categorized,
+    );
     const illustrations = await this.illustrationEngineAgent(mapped);
     const theme = await this.themeEngineAgent(categorized, mapped);
-    return this.finalAssemblerAgent(
+    const assembled = this.finalAssemblerAgent(
       categorized,
       slidePlan,
       mapped,
+      structuredVisualData,
       illustrations,
       theme,
     );
+    const finalMapPPT = this.finalMapPptAgent(assembled);
+    const pptRenderMap = this.pptMapperAgent(finalMapPPT);
+    const generatedPpt = await this.pptFileGeneratorAgent(pptRenderMap);
+
+    return {
+      ...assembled,
+      finalMapPPT,
+      pptRenderMap,
+      generatedPpt,
+    };
   }
 
   private async categorizeAndUnderstandAgent(
@@ -361,6 +400,62 @@ Slides:\n${JSON.stringify(
     }
   }
 
+  private async visualDataExtractionAgent(
+    mappedSlides: SlideContentMap[],
+    categorized: CategorizedRequest,
+  ): Promise<SlideVisualDataMap[]> {
+    const prompt = `You are agent-4b visual data extraction engine.
+Task: convert slide text into structured renderable visual data.
+Return ONLY valid JSON array in this exact shape:
+[
+  {
+    "slideId": 1,
+    "visual": "bar_chart|line_chart|pie_chart|timeline|process_flow|comparison_table|stats_cards|infographic|architecture_diagram|growth_curve",
+    "data": {
+      "chartData": { "type": "bar|line|pie", "title": "string", "categories": ["string"], "values": [10,20] },
+      "timelineData": { "steps": ["string"] },
+      "processData": { "steps": ["string"] },
+      "comparisonData": { "rows": [{ "metric": "string", "left": "string", "right": "string" }] },
+      "statsData": { "cards": [{ "label": "string", "value": "string" }] }
+    }
+  }
+]
+Rules:
+- Include only relevant data blocks for the visual type.
+- Prefer concrete numbers from bullets where present.
+- Keep arrays length 3-6 typically.
+Slides:\n${JSON.stringify(
+      mappedSlides.map((slide) => ({
+        slideId: slide.slideId,
+        visual: slide.content.visual,
+        heading: slide.content.heading,
+        bullets: slide.content.bullets,
+      })),
+    )}
+Context:\n${JSON.stringify(categorized)}`;
+
+    try {
+      const text = await this.askAi(prompt);
+      const parsed = this.parseJson<SlideVisualDataMap[]>(text);
+      if (!Array.isArray(parsed)) {
+        throw new Error('Invalid visual structured data JSON');
+      }
+
+      return parsed
+        .filter((item) => item && typeof item.slideId === 'number')
+        .map((item) => ({
+          slideId: item.slideId,
+          visual: item.visual,
+          data: item.data || {},
+        }));
+    } catch (error) {
+      this.logger.warn(
+        `visualDataExtractionAgent fallback: ${error instanceof Error ? error.message : 'unknown'}`,
+      );
+      return [];
+    }
+  }
+
   private async themeEngineAgent(
     categorized: CategorizedRequest,
     mappedSlides: SlideContentMap[],
@@ -407,11 +502,15 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
     categorized: CategorizedRequest,
     plan: SlidePlan,
     mapped: SlideContentMap[],
+    visualData: SlideVisualDataMap[],
     illustrations: IllustrationAsset[],
     theme: ThemeSpec,
-  ): FinalPptPayload {
+  ): Omit<FinalPptPayload, 'finalMapPPT' | 'pptRenderMap' | 'generatedPpt'> {
     const illustrationBySlideId = new Map(
       illustrations.map((item) => [item.slideId, item]),
+    );
+    const visualDataBySlideId = new Map(
+      visualData.map((item) => [item.slideId, item.data]),
     );
 
     return {
@@ -431,6 +530,7 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
         speakerNotes: slide.content.speaker_notes,
         layoutType: slide.content.layoutType,
         visual: slide.content.visual,
+        structuredData: visualDataBySlideId.get(slide.slideId),
         illustration: illustrationBySlideId.get(slide.slideId) ?? {
           slideId: slide.slideId,
           visualKey: slide.content.visual,
@@ -440,6 +540,26 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
         },
       })),
     };
+  }
+
+  private finalMapPptAgent(
+    finalPayload: Omit<FinalPptPayload, 'finalMapPPT' | 'pptRenderMap' | 'generatedPpt'>,
+  ): FinalMapPPT {
+    return this.pptTemplateService.buildFinalMapPPT(
+      finalPayload.title,
+      finalPayload.slides,
+      finalPayload.theme,
+    );
+  }
+
+  private pptMapperAgent(finalMapPPT: FinalMapPPT): PptRenderMap {
+    return this.pptTemplateService.buildPptRenderMap(finalMapPPT);
+  }
+
+  private async pptFileGeneratorAgent(
+    renderMap: PptRenderMap,
+  ): Promise<GeneratedPptFile> {
+    return this.pptRenderService.generatePptFile(renderMap);
   }
 
   private async askAi(prompt: string): Promise<string> {
