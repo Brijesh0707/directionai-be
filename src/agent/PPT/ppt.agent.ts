@@ -15,8 +15,12 @@ export type SlidePlan = {
 
 export type SlideContent = {
   heading: string;
+  subheading?: string;
+  highlight_text?: string;
   bullets: string[];
   visual: string;
+  speaker_notes?: string;
+  layoutType?: string;
 };
 
 export type CategorizedRequest = {
@@ -63,7 +67,11 @@ export type FinalPptPayload = {
     title: string;
     goal: string;
     heading: string;
+    subheading?: string;
     bullets: string[];
+    highlightText?: string;
+    speakerNotes?: string;
+    layoutType?: string;
     visual: string;
     illustration: IllustrationAsset;
   }>;
@@ -72,6 +80,32 @@ export type FinalPptPayload = {
 @Injectable()
 export class PptAgentService {
   private readonly logger = new Logger(PptAgentService.name);
+
+ private readonly Visual = [
+  "bar_chart",
+  "line_chart",
+  "pie_chart",
+  "timeline",
+  "process_flow",
+  "comparison_table",
+  "stats_cards",
+  "infographic",
+  "architecture_diagram",
+  "growth_curve"
+];
+
+private readonly Layouts = [
+  "hero",
+  "two_column",
+  "image_left_content_right",
+  "stats",
+  "comparison",
+  "timeline",
+  "bullet_list",
+  "quote",
+  "team_grid",
+  "cta"
+];
 
   constructor(private readonly aiService: AiService) {}
 
@@ -149,7 +183,7 @@ Return ONLY valid JSON in this exact shape:
   ]
 }
 Constraints:
-- as many as 10 slides but as few as possible to cover the topic effectively
+- as many as no limit according request but typically above 10
 - IDs must be sequential starting from 1
 Context JSON:\n${JSON.stringify(categorized)}`;
 
@@ -211,11 +245,18 @@ Context JSON:\n${JSON.stringify(categorized)}`;
     for (const slide of plan.slides) {
       const prompt = `You are agent-3 of a PPT architecture.
 Task: Create slide content for one slide.
+write proper content and bulkyness according to slide type and goal but keep it concise.
+visual list : ${this.Visual.join(', ')}
+Layout list : ${this.Layouts.join(', ')}
 Return ONLY valid JSON in this exact shape:
 {
   "heading": "string",
+   "subheading": "string",
+    "highlight_text": "string",
   "bullets": ["string", "string", "string"],
-  "visual": "string"
+  "visual": "string",
+  "speaker_notes": "string",
+  "layoutType": "string"
 }
 Slide JSON:\n${JSON.stringify(slide)}
 Context JSON:\n${JSON.stringify(categorized)}`;
@@ -250,12 +291,16 @@ Context JSON:\n${JSON.stringify(categorized)}`;
           goal: slide.goal,
           content: {
             heading: slide.title,
+            subheading: slide.goal,
+            highlight_text: categorized.objective,
             bullets: [
               slide.goal,
               categorized.problem,
               categorized.objective,
             ].filter(Boolean),
             visual: `${slide.type}_visual`,
+            speaker_notes: `${slide.title}: ${slide.goal}`,
+            layoutType: 'bullet_list',
           },
         });
       }
@@ -380,7 +425,11 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
         title: slide.title,
         goal: slide.goal,
         heading: slide.content.heading,
+        subheading: slide.content.subheading,
         bullets: slide.content.bullets,
+        highlightText: slide.content.highlight_text,
+        speakerNotes: slide.content.speaker_notes,
+        layoutType: slide.content.layoutType,
         visual: slide.content.visual,
         illustration: illustrationBySlideId.get(slide.slideId) ?? {
           slideId: slide.slideId,
@@ -395,10 +444,14 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
 
   private async askAi(prompt: string): Promise<string> {
     const model =
-      process.env.PPT_AGENT_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
-    const result = await this.aiService.generateWithModel(prompt, model, {
-      temperature: 0.2,
-      max_output_tokens: 1200,
+      process.env.PPT_AGENT_MODEL ??
+      process.env.BEDROCK_MODEL_ID ??
+      'anthropic.claude-3-5-sonnet-20240620-v1:0';
+    const result = await this.aiService.generateWithBedrock(prompt, model, {
+      inferenceConfig: {
+        temperature: 0.2,
+        maxTokens: 4000,
+      },
     });
     return result.text;
   }

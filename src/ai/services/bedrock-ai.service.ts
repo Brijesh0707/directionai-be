@@ -16,12 +16,11 @@ export class BedrockAiService {
           ? {
               accessKeyId: process.env.AWS_ACCESS_KEY_ID,
               secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-              sessionToken: process.env.AWS_SESSION_TOKEN,
             }
           : undefined,
     });
 
-    const model = modelName ?? process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-3-5-sonnet-20240620-v1:0';
+    const model = process.env.BEDROCK_MODEL_ID ?? 'deepseek.v3-v1:0';
     const command = new ConverseCommand({
       modelId: model,
       messages: [
