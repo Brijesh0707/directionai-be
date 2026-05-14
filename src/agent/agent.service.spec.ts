@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentService } from './agent.service';
+import { MarketingAgent } from './Marketing/marketing.agent';
 import { PptAgentService } from './PPT/ppt.agent';
+import { ResearchAgentService } from './Research/research';
 
 describe('AgentService', () => {
   let service: AgentService;
@@ -13,6 +15,18 @@ describe('AgentService', () => {
           provide: PptAgentService,
           useValue: {
             runPptAgentPipeline: jest.fn(),
+          },
+        },
+        {
+          provide: ResearchAgentService,
+          useValue: {
+            runResearchAgentPipeline: jest.fn(),
+          },
+        },
+        {
+          provide: MarketingAgent,
+          useValue: {
+            runMarketingAgentPipeline: jest.fn(),
           },
         },
       ],

@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { FinalPptPayload, PptAgentService } from './PPT/ppt.agent';
+import { MarketingAgent } from './Marketing/marketing.agent';
 import { FinalResearchPayload, ResearchAgentService } from './Research/research';
 
-export type AgentType = 'PPT' | 'RESEARCH';
-export type AgentResult = FinalPptPayload | FinalResearchPayload;
+export type AgentType = 'PPT' | 'RESEARCH' | 'MARKETING';
+
+export type AgentResult = FinalPptPayload | FinalResearchPayload ;
 
 @Injectable()
 export class AgentService {
@@ -12,6 +14,7 @@ export class AgentService {
   constructor(
     private readonly pptAgentService: PptAgentService,
     private readonly researchAgentService: ResearchAgentService,
+    private readonly marketingAgent: MarketingAgent,
   ) {}
 
   async runAgent(agentType: string, text: string): Promise<AgentResult> {
@@ -35,9 +38,12 @@ export class AgentService {
       case 'RESEARCH':
         this.logger.log('Routing request to ResearchAgentService');
         return this.researchAgentService.runResearchAgentPipeline(normalizedText);
+      case 'MARKETING':
+        this.logger.log('Routing request to MarketingAgent');
+        return this.marketingAgent.runMarketingAgentPipeline(normalizedText);
       default:
         throw new BadRequestException(
-          `Unsupported agent type: ${agentType}. Supported types: PPT, RESEARCH`,
+          `Unsupported agent type: ${agentType}. Supported types: PPT, RESEARCH, MARKETING`,
         );
     }
   }

@@ -8,6 +8,8 @@ import { AgentController } from './agent.controller';
 import { ResearchTestController } from './research-test.controller';
 import { ResearchAgentService } from './Research/research';
 import { MarketResearchService } from './Research/SearchAgent/market.research';
+import { MarketingAgent } from './Marketing/marketing.agent';
+
 
 @Module({
   imports: [AiModule],
@@ -19,6 +21,7 @@ import { MarketResearchService } from './Research/SearchAgent/market.research';
     PptRenderService,
     ResearchAgentService,
     MarketResearchService,
+    MarketingAgent,
   ],
   exports: [
     AgentService,
@@ -27,6 +30,7 @@ import { MarketResearchService } from './Research/SearchAgent/market.research';
     PptRenderService,
     ResearchAgentService,
     MarketResearchService,
+    MarketingAgent,
   ],
 })
 export class AgentModule {}
