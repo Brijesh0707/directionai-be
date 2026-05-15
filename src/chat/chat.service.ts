@@ -233,8 +233,20 @@ export class ChatService {
   private extractReportPath(result: unknown): string | null {
     if (!result || typeof result !== 'object') return null;
 
-    const value = result as { generatedPpt?: { filePath?: string } };
-    return value.generatedPpt?.filePath ?? null;
+    const value = result as {
+      generatedPpt?: {
+        filePath?: string;
+        relativePath?: string;
+        absolutePath?: string;
+      };
+    };
+
+    return (
+      value.generatedPpt?.relativePath ??
+      value.generatedPpt?.filePath ??
+      value.generatedPpt?.absolutePath ??
+      null
+    );
   }
 
   private toJsonInput(value: unknown): Prisma.InputJsonValue {
