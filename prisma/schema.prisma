@@ -12,6 +12,20 @@ enum AuthProvider {
   google
 }
 
+enum ChatSessionStatus {
+  draft
+  running
+  completed
+  failed
+}
+
+enum AgentRunStatus {
+  queued
+  running
+  completed
+  failed
+}
+
 model User {
   id                 String       @id @default(auto()) @map("_id") @db.ObjectId
   email              String       @unique
@@ -29,6 +43,45 @@ model User {
   refreshTokenHash   String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
+
+  chatSessions       ChatSession[]
+}
+
+model ChatSession {
+  id         String            @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String            @db.ObjectId
+  title      String
+  idea       String
+  status     ChatSessionStatus @default(draft)
+  progress   Int               @default(0)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  user       User              @relation(fields: [userId], references: [id])
+  agentRuns  AgentRun[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model AgentRun {
+  id            String         @id @default(auto()) @map("_id") @db.ObjectId
+  chatSessionId String         @db.ObjectId
+  agentType     String
+  status        AgentRunStatus @default(queued)
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  resultJson    Json?
+  errorMessage  String?
+  reportPath    String?
+  reportName    String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  chatSession   ChatSession    @relation(fields: [chatSessionId], references: [id])
+
+  @@index([chatSessionId, createdAt])
+  @@index([status])
 }
 
 model AiModelAudit {
