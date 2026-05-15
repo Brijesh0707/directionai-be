@@ -6,10 +6,6 @@ import {
   PptTemplateService,
   StructuredVisualData,
 } from './Templates/ppt-template.service';
-import {
-  GeneratedPptFile,
-  PptRenderService,
-} from './Templates/ppt-render.service';
 
 export type SlideBlueprint = {
   id: number;
@@ -94,7 +90,6 @@ export type FinalPptPayload = {
   }>;
   finalMapPPT: FinalMapPPT;
   pptRenderMap: PptRenderMap;
-  generatedPpt: GeneratedPptFile;
 };
 
 @Injectable()
@@ -130,22 +125,29 @@ export class PptAgentService {
   constructor(
     private readonly aiService: AiService,
     private readonly pptTemplateService: PptTemplateService,
-    private readonly pptRenderService: PptRenderService,
   ) {}
 
   async runPptAgentPipeline(
     requestText: string,
     inputPlan?: SlidePlan,
+    onProgress?: (stage: string, message: string, progress: number) => void,
   ): Promise<FinalPptPayload> {
+    onProgress?.('categorize', 'Understanding request and presentation intent', 10);
     const categorized = await this.categorizeAndUnderstandAgent(requestText);
+    onProgress?.('planning', 'Planning slide architecture', 22);
     const slidePlan = await this.slidePlanningAgent(categorized, inputPlan);
+    onProgress?.('content-map', 'Mapping content for each slide', 38);
     const mapped = await this.slideContentMapperAgent(slidePlan, categorized);
+    onProgress?.('visual-data', 'Extracting chart and visual data', 52);
     const structuredVisualData = await this.visualDataExtractionAgent(
       mapped,
       categorized,
     );
+    onProgress?.('illustrations', 'Preparing slide illustrations', 66);
     const illustrations = await this.illustrationEngineAgent(mapped);
+    onProgress?.('theme', 'Generating presentation theme', 76);
     const theme = await this.themeEngineAgent(categorized, mapped);
+    onProgress?.('assemble', 'Assembling final slide payload', 84);
     const assembled = this.finalAssemblerAgent(
       categorized,
       slidePlan,
@@ -154,15 +156,15 @@ export class PptAgentService {
       illustrations,
       theme,
     );
+    onProgress?.('render-map', 'Building PPT render map', 90);
     const finalMapPPT = this.finalMapPptAgent(assembled);
     const pptRenderMap = this.pptMapperAgent(finalMapPPT);
-    const generatedPpt = await this.pptFileGeneratorAgent(pptRenderMap);
+    onProgress?.('done', 'PPT pipeline completed', 100);
 
     return {
       ...assembled,
       finalMapPPT,
       pptRenderMap,
-      generatedPpt,
     };
   }
 
@@ -543,7 +545,7 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
   }
 
   private finalMapPptAgent(
-    finalPayload: Omit<FinalPptPayload, 'finalMapPPT' | 'pptRenderMap' | 'generatedPpt'>,
+    finalPayload: Omit<FinalPptPayload, 'finalMapPPT' | 'pptRenderMap'>,
   ): FinalMapPPT {
     return this.pptTemplateService.buildFinalMapPPT(
       finalPayload.title,
@@ -554,12 +556,6 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
 
   private pptMapperAgent(finalMapPPT: FinalMapPPT): PptRenderMap {
     return this.pptTemplateService.buildPptRenderMap(finalMapPPT);
-  }
-
-  private async pptFileGeneratorAgent(
-    renderMap: PptRenderMap,
-  ): Promise<GeneratedPptFile> {
-    return this.pptRenderService.generatePptFile(renderMap);
   }
 
   private async askAi(prompt: string): Promise<string> {

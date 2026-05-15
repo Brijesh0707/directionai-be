@@ -383,8 +383,12 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     };
   }
 
-  async runMarketingAgentPipeline(input: string): Promise<FinalMarketingPayload> {
+  async runMarketingAgentPipeline(
+    input: string,
+    onProgress?: (stage: string, message: string, progress: number) => void,
+  ): Promise<FinalMarketingPayload> {
     this.logger.log('Running MarketingAgent pipeline with enhanced split strategy');
+    onProgress?.('setup', 'Preparing marketing analysis sections', 8);
 
     // SECTION 1: Core Business Understanding (smaller, less likely to fail)
     const section1Prompt = `
@@ -474,6 +478,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     }`;
 
     // Execute all sections with appropriate splitting
+    onProgress?.('execution', 'Running sectioned marketing agents', 22);
     const [
       section1Result,
       section2Result,
@@ -491,6 +496,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
       this.executeSection6WithSplit(input),
       this.executePromptWithValidation(section7Prompt, 'Section 7 (Execution & Summary)', 2500)
     ]);
+    onProgress?.('merge', 'Merging section outputs into final strategy', 88);
 
     // Merge all sections into the complete response structure
     const completeResponse: FinalMarketingPayload = {
@@ -506,6 +512,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     };
 
     this.logger.log('Successfully merged all sections into complete response');
+    onProgress?.('done', 'Marketing strategy pipeline completed', 100);
     return completeResponse;
   }
 }

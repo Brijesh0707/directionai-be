@@ -5,22 +5,21 @@ import {
   MessageEvent,
   Param,
   Post,
+  Query,
   Req,
-  Res,
   Sse,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import type { Request, Response } from 'express';
+import type { Request } from 'express';
 import { map, Observable } from 'rxjs';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthUser } from '../auth/types/auth-user.type';
 import { ChatService } from './chat.service';
 import { CreateChatDto } from './dto/create-chat.dto';
+import { ListSessionSummariesDto } from './dto/list-session-summaries.dto';
 import { RunAgentsDto } from './dto/run-agents.dto';
-import { createReadStream, existsSync } from 'fs';
-import { resolve } from 'path';
 
 @Controller('chat')
 export class ChatController {
@@ -39,6 +38,15 @@ export class ChatController {
   @Get('sessions')
   listSessions(@Req() req: Request & { user: AuthUser }) {
     return this.chatService.listSessions(req.user.sub);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('sessions/summary')
+  listSessionSummaries(
+    @Req() req: Request & { user: AuthUser },
+    @Query() query: ListSessionSummariesDto,
+  ) {
+    return this.chatService.listSessionSummaries(req.user.sub, query);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -71,32 +79,6 @@ export class ChatController {
     @Param('runId') runId: string,
   ) {
     return this.chatService.getRunResult(req.user.sub, chatId, runId);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('sessions/:chatId/reports/:runId/download')
-  async downloadReport(
-    @Req() req: Request & { user: AuthUser },
-    @Param('chatId') chatId: string,
-    @Param('runId') runId: string,
-    @Res() res: Response,
-  ) {
-    const run = await this.chatService.getRunResult(req.user.sub, chatId, runId);
-    if (!run.reportPath) {
-      return res.status(404).json({ message: 'Download not available for this run' });
-    }
-
-    const absolutePath = resolve(process.cwd(), run.reportPath);
-    if (!existsSync(absolutePath)) {
-      return res.status(404).json({ message: 'Report file not found' });
-    }
-
-    const filename = run.reportName || `${run.agentType.toLowerCase()}-report.pptx`;
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    const stream = createReadStream(absolutePath);
-    stream.pipe(res);
   }
 
   @Sse('sessions/:chatId/stream')

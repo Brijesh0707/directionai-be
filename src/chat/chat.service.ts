@@ -8,6 +8,7 @@ import { AgentRunStatus, ChatSessionStatus, Prisma } from '@prisma/client';
 import { Subject } from 'rxjs';
 import { AgentService } from '../agent/agent.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListSessionSummariesDto } from './dto/list-session-summaries.dto';
 
 export type ChatStreamEvent = {
   type: 'session' | 'agent';
@@ -69,6 +70,58 @@ export class ChatService {
     });
   }
 
+  async listSessionSummaries(userId: string, query: ListSessionSummariesDto) {
+    const page = Number.isFinite(Number(query.page)) ? Math.max(1, Number(query.page)) : 1;
+    const limit = Number.isFinite(Number(query.limit))
+      ? Math.min(50, Math.max(1, Number(query.limit)))
+      : 12;
+    const search = query.search?.trim();
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ChatSessionWhereInput = {
+      userId,
+      ...(search
+        ? {
+            OR: [
+              { title: { contains: search, mode: 'insensitive' } },
+              { idea: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [sessions, total] = await this.prisma.$transaction([
+      this.prisma.chatSession.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          title: true,
+          idea: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.chatSession.count({ where }),
+    ]);
+
+    const items = sessions.map((session) => ({
+      id: session.id,
+      title: session.title,
+      description: session.idea.slice(0, 180),
+      createdAt: session.createdAt,
+    }));
+
+    return {
+      items,
+      page,
+      limit,
+      total,
+      hasMore: skip + items.length < total,
+    };
+  }
+
   async getSession(userId: string, chatId: string) {
     const session = await this.prisma.chatSession.findUnique({
       where: { id: chatId },
@@ -126,17 +179,25 @@ export class ChatService {
       });
 
       try {
-        const result = await this.agentService.runAgent(agentType, session.idea);
-        const reportPath = this.extractReportPath(result);
-
+        const result = await this.agentService.runAgent(agentType, session.idea, (event) => {
+          this.emit(chatId, {
+            type: 'agent',
+            chatId,
+            runId: run.id,
+            agentType: event.agentType,
+            message: `[${event.agentType}] ${event.message}`,
+            progress: this.computeAgentAwareProgress(completed, total, event.progress),
+            status: 'running',
+          });
+        });
         await this.prisma.agentRun.update({
           where: { id: run.id },
           data: {
             status: AgentRunStatus.completed,
             finishedAt: new Date(),
             resultJson: this.toJsonInput(result),
-            reportPath: reportPath ?? null,
-            reportName: reportPath ? reportPath.split('/').pop() : null,
+            reportPath: null,
+            reportName: null,
           },
         });
 
@@ -230,25 +291,6 @@ export class ChatService {
     return run;
   }
 
-  private extractReportPath(result: unknown): string | null {
-    if (!result || typeof result !== 'object') return null;
-
-    const value = result as {
-      generatedPpt?: {
-        filePath?: string;
-        relativePath?: string;
-        absolutePath?: string;
-      };
-    };
-
-    return (
-      value.generatedPpt?.relativePath ??
-      value.generatedPpt?.filePath ??
-      value.generatedPpt?.absolutePath ??
-      null
-    );
-  }
-
   private toJsonInput(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
@@ -256,6 +298,13 @@ export class ChatService {
   private computeProgress(completed: number, total: number): number {
     if (total === 0) return 0;
     return Math.min(100, Math.max(10, Math.round((completed / total) * 100)));
+  }
+
+  private computeAgentAwareProgress(completed: number, total: number, agentProgress: number): number {
+    if (total === 0) return 0;
+    const bounded = Math.min(100, Math.max(0, agentProgress));
+    const aggregate = ((completed + bounded / 100) / total) * 100;
+    return Math.min(99, Math.max(10, Math.round(aggregate)));
   }
 
   private emit(chatId: string, payload: Omit<ChatStreamEvent, 'timestamp'>) {

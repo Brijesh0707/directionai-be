@@ -100,32 +100,40 @@ export class DevelopmentAgent {
 
   constructor(private readonly aiService: AiService) {}
 
-  async runDevelopmentAgentPipeline(input: string): Promise<FinalDevelopmentPayload> {
+  async runDevelopmentAgentPipeline(
+    input: string,
+    onProgress?: (stage: string, message: string, progress: number) => void,
+  ): Promise<FinalDevelopmentPayload> {
     this.logger.log('Running DevelopmentAgent pipeline');
+    onProgress?.('understanding', 'Analyzing project understanding', 12);
 
     const understanding = await this.executePromptWithValidation<ProjectUnderstanding>(
       this.buildUnderstandingPrompt(input),
       'project_understanding',
       ['project_summary', 'problem_statement', 'proposed_solution', 'project_category'],
     );
+    onProgress?.('planning', 'Creating delivery and phase plan', 30);
 
     const planning = await this.executePromptWithValidation<DeliveryPlanning>(
       this.buildPlanningPrompt(input, understanding),
       'delivery_planning',
       ['recommended_phases', 'mvp_definition', 'final_release_definition'],
     );
+    onProgress?.('uiux', 'Generating UI/UX direction', 48);
 
     const uiUx = await this.executePromptWithValidation<UiUxSuggestion>(
       this.buildUiUxPrompt(input, understanding),
       'ui_ux_suggestion',
       ['design_direction', 'color_palette', 'ui_patterns', 'style_references'],
     );
+    onProgress?.('scope-map', 'Mapping development scope by phase', 66);
 
     const scopeMap = await this.executePromptWithValidation<DevelopmentScopeMap>(
       this.buildScopePrompt(input, planning),
       'development_scope_map',
       ['phase_scope'],
     );
+    onProgress?.('tech-stack', 'Selecting technology stack and tradeoffs', 82);
 
     const techStack = await this.executePromptWithValidation<TechStackSuggestion>(
       this.buildTechStackPrompt(input, understanding),
@@ -140,6 +148,7 @@ export class DevelopmentAgent {
       scopeMap,
       techStack,
     );
+    onProgress?.('done', 'Development roadmap completed', 100);
 
     return {
       response_structure: {

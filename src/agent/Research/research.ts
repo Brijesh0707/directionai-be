@@ -36,15 +36,30 @@ export class ResearchAgentService {
     private readonly pptAgentService: PptAgentService,
   ) {}
 
-  async runResearchAgentPipeline(requestText: string): Promise<FinalResearchPayload> {
+  async runResearchAgentPipeline(
+    requestText: string,
+    onProgress?: (stage: string, message: string, progress: number) => void,
+  ): Promise<FinalResearchPayload> {
     this.logger.log('runResearchAgentPipeline started');
+    onProgress?.('summarize', 'Summarizing research request', 10);
 
     const summarizedRequest = await this.summarizeRequestAgent(requestText);
+    onProgress?.('aggregate-search', 'Collecting market and competitor signals', 34);
     const searchAgentResponses = await this.searchAggregationAgent(summarizedRequest);
+    onProgress?.('merge', 'Merging and synthesizing findings', 58);
     const mergedResponse = await this.mergeResponsesAgent(requestText, searchAgentResponses);
 
     this.logger.log('runResearchAgentPipeline running PPT pipeline from mergedResponse');
-    const pptResponse = await this.pptAgentService.runPptAgentPipeline(mergedResponse);
+    onProgress?.('ppt-subflow', 'Converting research into presentation output', 72);
+    const pptResponse = await this.pptAgentService.runPptAgentPipeline(
+      mergedResponse,
+      undefined,
+      (stage, message, progress) => {
+        const translated = 72 + Math.round((progress / 100) * 26);
+        onProgress?.(`ppt-${stage}`, `PPT sub-agent: ${message}`, translated);
+      },
+    );
+    onProgress?.('done', 'Research pipeline completed', 100);
 
     this.logger.log('runResearchAgentPipeline completed');
 
