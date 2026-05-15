@@ -9,6 +9,7 @@ import { ResearchTestController } from './research-test.controller';
 import { ResearchAgentService } from './Research/research';
 import { MarketResearchService } from './Research/SearchAgent/market.research';
 import { MarketingAgent } from './Marketing/marketing.agent';
+import { DevelopmentAgent } from './Development/development.agent';
 
 
 @Module({
@@ -22,6 +23,7 @@ import { MarketingAgent } from './Marketing/marketing.agent';
     ResearchAgentService,
     MarketResearchService,
     MarketingAgent,
+    DevelopmentAgent,
   ],
   exports: [
     AgentService,
@@ -31,6 +33,7 @@ import { MarketingAgent } from './Marketing/marketing.agent';
     ResearchAgentService,
     MarketResearchService,
     MarketingAgent,
+    DevelopmentAgent,
   ],
 })
 export class AgentModule {}
