@@ -1,11 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { FinalPptPayload, PptAgentService } from './PPT/ppt.agent';
-import { MarketingAgent } from './Marketing/marketing.agent';
+import { FinalMarketingPayload, MarketingAgent } from './Marketing/marketing.agent';
 import { FinalResearchPayload, ResearchAgentService } from './Research/research';
 
 export type AgentType = 'PPT' | 'RESEARCH' | 'MARKETING';
 
-export type AgentResult = FinalPptPayload | FinalResearchPayload ;
+export type AgentResult = FinalPptPayload | FinalResearchPayload | FinalMarketingPayload;
 
 @Injectable()
 export class AgentService {
