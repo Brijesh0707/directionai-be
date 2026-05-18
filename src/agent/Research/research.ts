@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../../ai/ai.service';
-import { FinalPptPayload, PptAgentService } from '../PPT/ppt.agent';
 import { MarketResearchService } from './SearchAgent/market.research';
 
 type ResearchSummary = {
@@ -23,7 +22,6 @@ export type FinalResearchPayload = {
   summarizedRequest: ResearchSummary;
   searchAgentResponses: ResearchSectionResult[];
   mergedResponse: string;
-  pptResponse: FinalPptPayload;
 };
 
 @Injectable()
@@ -33,7 +31,6 @@ export class ResearchAgentService {
   constructor(
     private readonly aiService: AiService,
     private readonly marketResearchService: MarketResearchService,
-    private readonly pptAgentService: PptAgentService,
   ) {}
 
   async runResearchAgentPipeline(
@@ -49,16 +46,6 @@ export class ResearchAgentService {
     onProgress?.('merge', 'Merging and synthesizing findings', 58);
     const mergedResponse = await this.mergeResponsesAgent(requestText, searchAgentResponses);
 
-    this.logger.log('runResearchAgentPipeline running PPT pipeline from mergedResponse');
-    onProgress?.('ppt-subflow', 'Converting research into presentation output', 72);
-    const pptResponse = await this.pptAgentService.runPptAgentPipeline(
-      mergedResponse,
-      undefined,
-      (stage, message, progress) => {
-        const translated = 72 + Math.round((progress / 100) * 26);
-        onProgress?.(`ppt-${stage}`, `PPT sub-agent: ${message}`, translated);
-      },
-    );
     onProgress?.('done', 'Research pipeline completed', 100);
 
     this.logger.log('runResearchAgentPipeline completed');
@@ -68,7 +55,6 @@ export class ResearchAgentService {
       summarizedRequest,
       searchAgentResponses,
       mergedResponse,
-      pptResponse,
     };
   }
 
