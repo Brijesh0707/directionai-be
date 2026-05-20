@@ -162,11 +162,11 @@ export class DevelopmentAgent {
     };
   }
 
-  private async askAi(prompt: string, maxTokens = 2500): Promise<string> {
+  private async askAi(prompt: string, maxTokens = 4000): Promise<string> {
     const model =
       process.env.DEVELOPMENT_AGENT_MODEL ??
       process.env.BEDROCK_MODEL_ID ??
-      'anthropic.claude-3-5-sonnet-20240620-v1:0';
+      'anthropic.claude-3-7-sonnet-20250219-v1:0';
     const result = await this.aiService.generateWithBedrock(prompt, model, {
       inferenceConfig: {
         temperature: 0.2,
