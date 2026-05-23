@@ -72,6 +72,12 @@ export class ChatController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('sessions/:chatId/usage')
+  getUsage(@Req() req: Request & { user: AuthUser }, @Param('chatId') chatId: string) {
+    return this.chatService.getUsage(req.user.sub, chatId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('sessions/:chatId/runs/:runId')
   getRunResult(
     @Req() req: Request & { user: AuthUser },

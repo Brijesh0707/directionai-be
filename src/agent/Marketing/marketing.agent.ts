@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import MarketingData from '../../../knowleage/Marketing.json';
 import { AiService } from 'src/ai/ai.service';
+import type { AgentUsageContext } from '../types/agent-usage-context.type';
 
 export type FinalMarketingPayload = {
   response_structure: Record<string, unknown>;
@@ -18,17 +19,26 @@ export class MarketingAgent {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  private async askAi(prompt: string, maxTokens: number = 4000): Promise<string> {
+  private async askAi(
+    prompt: string,
+    maxTokens: number = 4000,
+    usageContext?: AgentUsageContext,
+  ): Promise<string> {
     const model =
-      process.env.PPT_AGENT_MODEL ??
+      process.env.MARKETING_AGENT_MODEL ??
       process.env.BEDROCK_MODEL_ID ??
-      'anthropic.claude-3-7-sonnet-20250219-v1:0';
-    const result = await this.aiService.generateWithBedrock(prompt, model, {
-      inferenceConfig: {
-        temperature: 0.2,
-        maxTokens: maxTokens,
+      'deepseek.v3-v1:0';
+    const result = await this.aiService.generateWithBedrock(
+      prompt,
+      model,
+      {
+        inferenceConfig: {
+          temperature: 0.2,
+          maxTokens: maxTokens,
+        },
       },
-    });
+      usageContext,
+    );
     return result.text;
   }
 
@@ -53,10 +63,11 @@ export class MarketingAgent {
     prompt: string, 
     sectionName: string, 
     maxTokens: number = 4000,
-    retryCount: number = 0
+    retryCount: number = 0,
+    usageContext?: AgentUsageContext,
   ): Promise<any> {
     try {
-      const aiResponse = await this.askAi(prompt, maxTokens);
+      const aiResponse = await this.askAi(prompt, maxTokens, usageContext);
       
       let cleanedResponse = this.cleanAndExtractJson(aiResponse);
       
@@ -94,7 +105,16 @@ export class MarketingAgent {
         
         // Modify prompt for retry to be more explicit
         const retryPrompt = this.createRetryPrompt(prompt, sectionName);
-        return this.executePromptWithValidation(retryPrompt, sectionName, maxTokens, retryCount + 1);
+        return this.executePromptWithValidation(
+          retryPrompt,
+          sectionName,
+          maxTokens,
+          retryCount + 1,
+          {
+            ...usageContext,
+            callLabel: `${usageContext?.callLabel ?? sectionName}.retry${retryCount + 1}`,
+          },
+        );
       }
       
       throw new Error(`Failed to parse ${sectionName} response as JSON after ${this.MAX_RETRIES} attempts`);
@@ -169,7 +189,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
   }
 
   // Split section 3 into smaller sub-sections
-  private async executeSection3WithSplit(input: string): Promise<any> {
+  private async executeSection3WithSplit(input: string, usageContext?: AgentUsageContext): Promise<any> {
     this.logger.log('Executing Section 3 with sub-splits');
     
     const contentStrategyPrompt = `
@@ -223,8 +243,8 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     }`;
     
     const [contentStrategy, funnel] = await Promise.all([
-      this.executePromptWithValidation(contentStrategyPrompt, 'Section 3a (Content Strategy)', 3000),
-      this.executePromptWithValidation(funnelPrompt, 'Section 3b (Customer Journey Funnel)', 3000)
+      this.executePromptWithValidation(contentStrategyPrompt, 'Section 3a (Content Strategy)', 3000, 0, { ...usageContext, callLabel: 'marketing.contentStrategy' }),
+      this.executePromptWithValidation(funnelPrompt, 'Section 3b (Customer Journey Funnel)', 3000, 0, { ...usageContext, callLabel: 'marketing.customerJourneyFunnel' })
     ]);
     
     return {
@@ -234,7 +254,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
   }
 
   // Split section 4 into sub-sections
-  private async executeSection4WithSplit(input: string): Promise<any> {
+  private async executeSection4WithSplit(input: string, usageContext?: AgentUsageContext): Promise<any> {
     this.logger.log('Executing Section 4 with sub-splits');
     
     const conversionPrompt = `
@@ -264,8 +284,8 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     }`;
     
     const [conversionStrategy, growthStrategy] = await Promise.all([
-      this.executePromptWithValidation(conversionPrompt, 'Section 4a (Conversion Strategy)', 3000),
-      this.executePromptWithValidation(growthPrompt, 'Section 4b (Growth Strategy)', 3000)
+      this.executePromptWithValidation(conversionPrompt, 'Section 4a (Conversion Strategy)', 3000, 0, { ...usageContext, callLabel: 'marketing.conversionStrategy' }),
+      this.executePromptWithValidation(growthPrompt, 'Section 4b (Growth Strategy)', 3000, 0, { ...usageContext, callLabel: 'marketing.growthStrategy' })
     ]);
     
     return {
@@ -275,7 +295,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
   }
 
   // Split section 5 into sub-sections
-  private async executeSection5WithSplit(input: string): Promise<any> {
+  private async executeSection5WithSplit(input: string, usageContext?: AgentUsageContext): Promise<any> {
     this.logger.log('Executing Section 5 with sub-splits');
     
     const brandingPrompt = `
@@ -318,9 +338,9 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     }`;
     
     const [brandingStrategy, purchaseBehavior, marketPositioning] = await Promise.all([
-      this.executePromptWithValidation(brandingPrompt, 'Section 5a (Branding Strategy)', 3000),
-      this.executePromptWithValidation(purchaseBehaviorPrompt, 'Section 5b (Purchase Behavior)', 3000),
-      this.executePromptWithValidation(marketPositioningPrompt, 'Section 5c (Market Positioning)', 3000)
+      this.executePromptWithValidation(brandingPrompt, 'Section 5a (Branding Strategy)', 3000, 0, { ...usageContext, callLabel: 'marketing.brandingStrategy' }),
+      this.executePromptWithValidation(purchaseBehaviorPrompt, 'Section 5b (Purchase Behavior)', 3000, 0, { ...usageContext, callLabel: 'marketing.purchaseBehavior' }),
+      this.executePromptWithValidation(marketPositioningPrompt, 'Section 5c (Market Positioning)', 3000, 0, { ...usageContext, callLabel: 'marketing.marketPositioning' })
     ]);
     
     return {
@@ -331,7 +351,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
   }
 
   // Split section 6 into sub-sections
-  private async executeSection6WithSplit(input: string): Promise<any> {
+  private async executeSection6WithSplit(input: string, usageContext?: AgentUsageContext): Promise<any> {
     this.logger.log('Executing Section 6 with sub-splits');
     
     const automationPrompt = `
@@ -371,9 +391,9 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     }`;
     
     const [automation, risk, insights] = await Promise.all([
-      this.executePromptWithValidation(automationPrompt, 'Section 6a (Automation)', 3000),
-      this.executePromptWithValidation(riskPrompt, 'Section 6b (Risk Analysis)', 3000),
-      this.executePromptWithValidation(insightsPrompt, 'Section 6c (Deep Insights)', 3000)
+      this.executePromptWithValidation(automationPrompt, 'Section 6a (Automation)', 3000, 0, { ...usageContext, callLabel: 'marketing.automation' }),
+      this.executePromptWithValidation(riskPrompt, 'Section 6b (Risk Analysis)', 3000, 0, { ...usageContext, callLabel: 'marketing.riskAnalysis' }),
+      this.executePromptWithValidation(insightsPrompt, 'Section 6c (Deep Insights)', 3000, 0, { ...usageContext, callLabel: 'marketing.deepInsights' })
     ]);
     
     return {
@@ -386,6 +406,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
   async runMarketingAgentPipeline(
     input: string,
     onProgress?: (stage: string, message: string, progress: number) => void,
+    usageContext?: AgentUsageContext,
   ): Promise<FinalMarketingPayload> {
     this.logger.log('Running MarketingAgent pipeline with enhanced split strategy');
     onProgress?.('setup', 'Preparing marketing analysis sections', 8);
@@ -488,13 +509,13 @@ Make sure your response is a complete, valid JSON object that can be parsed with
       section6Result,
       section7Result
     ] = await Promise.all([
-      this.executePromptWithValidation(section1Prompt, 'Section 1 (Core Business)', 4000),
-      this.executePromptWithValidation(section2Prompt, 'Section 2 (Brain & Platform)', 3000),
-      this.executeSection3WithSplit(input),
-      this.executeSection4WithSplit(input),
-      this.executeSection5WithSplit(input),
-      this.executeSection6WithSplit(input),
-      this.executePromptWithValidation(section7Prompt, 'Section 7 (Execution & Summary)', 2500)
+      this.executePromptWithValidation(section1Prompt, 'Section 1 (Core Business)', 4000, 0, { ...usageContext, callLabel: 'marketing.coreBusiness' }),
+      this.executePromptWithValidation(section2Prompt, 'Section 2 (Brain & Platform)', 3000, 0, { ...usageContext, callLabel: 'marketing.brainPlatform' }),
+      this.executeSection3WithSplit(input, usageContext),
+      this.executeSection4WithSplit(input, usageContext),
+      this.executeSection5WithSplit(input, usageContext),
+      this.executeSection6WithSplit(input, usageContext),
+      this.executePromptWithValidation(section7Prompt, 'Section 7 (Execution & Summary)', 2500, 0, { ...usageContext, callLabel: 'marketing.executionSummary' })
     ]);
     onProgress?.('merge', 'Merging section outputs into final strategy', 88);
 

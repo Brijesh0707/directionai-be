@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from 'src/ai/ai.service';
+import type { AgentUsageContext } from '../types/agent-usage-context.type';
 
 type ProjectUnderstanding = {
   project_summary: string;
@@ -103,6 +104,7 @@ export class DevelopmentAgent {
   async runDevelopmentAgentPipeline(
     input: string,
     onProgress?: (stage: string, message: string, progress: number) => void,
+    usageContext?: AgentUsageContext,
   ): Promise<FinalDevelopmentPayload> {
     this.logger.log('Running DevelopmentAgent pipeline');
     onProgress?.('understanding', 'Analyzing project understanding', 12);
@@ -111,6 +113,7 @@ export class DevelopmentAgent {
       this.buildUnderstandingPrompt(input),
       'project_understanding',
       ['project_summary', 'problem_statement', 'proposed_solution', 'project_category'],
+      { ...usageContext, callLabel: 'development.projectUnderstanding' },
     );
     onProgress?.('planning', 'Creating delivery and phase plan', 30);
 
@@ -118,6 +121,7 @@ export class DevelopmentAgent {
       this.buildPlanningPrompt(input, understanding),
       'delivery_planning',
       ['recommended_phases', 'mvp_definition', 'final_release_definition'],
+      { ...usageContext, callLabel: 'development.deliveryPlanning' },
     );
     onProgress?.('uiux', 'Generating UI/UX direction', 48);
 
@@ -125,6 +129,7 @@ export class DevelopmentAgent {
       this.buildUiUxPrompt(input, understanding),
       'ui_ux_suggestion',
       ['design_direction', 'color_palette', 'ui_patterns', 'style_references'],
+      { ...usageContext, callLabel: 'development.uiUxSuggestion' },
     );
     onProgress?.('scope-map', 'Mapping development scope by phase', 66);
 
@@ -132,6 +137,7 @@ export class DevelopmentAgent {
       this.buildScopePrompt(input, planning),
       'development_scope_map',
       ['phase_scope'],
+      { ...usageContext, callLabel: 'development.scopeMap' },
     );
     onProgress?.('tech-stack', 'Selecting technology stack and tradeoffs', 82);
 
@@ -139,6 +145,7 @@ export class DevelopmentAgent {
       this.buildTechStackPrompt(input, understanding),
       'tech_stack_suggestion',
       ['recommended_stack', 'selection_reasoning', 'tradeoffs', 'bias_check_note'],
+      { ...usageContext, callLabel: 'development.techStack' },
     );
 
     const finalSummary = this.mergeFinalSummary(
@@ -162,17 +169,26 @@ export class DevelopmentAgent {
     };
   }
 
-  private async askAi(prompt: string, maxTokens = 4000): Promise<string> {
+  private async askAi(
+    prompt: string,
+    maxTokens = 4000,
+    usageContext?: AgentUsageContext,
+  ): Promise<string> {
     const model =
       process.env.DEVELOPMENT_AGENT_MODEL ??
       process.env.BEDROCK_MODEL_ID ??
-      'anthropic.claude-3-7-sonnet-20250219-v1:0';
-    const result = await this.aiService.generateWithBedrock(prompt, model, {
-      inferenceConfig: {
-        temperature: 0.2,
-        maxTokens,
+      'deepseek.v3-v1:0';
+    const result = await this.aiService.generateWithBedrock(
+      prompt,
+      model,
+      {
+        inferenceConfig: {
+          temperature: 0.2,
+          maxTokens,
+        },
       },
-    });
+      usageContext,
+    );
     return result.text;
   }
 
@@ -203,8 +219,9 @@ export class DevelopmentAgent {
     prompt: string,
     sectionName: string,
     requiredKeys: string[],
+    usageContext?: AgentUsageContext,
   ): Promise<T> {
-    const aiResponse = await this.askAi(prompt);
+    const aiResponse = await this.askAi(prompt, 4000, usageContext);
     const parsed = this.parseJson<T>(aiResponse);
     this.validateRequiredKeys(parsed, requiredKeys, sectionName);
     this.logger.log(`Validated section: ${sectionName}`);

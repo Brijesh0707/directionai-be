@@ -59,6 +59,8 @@ model ChatSession {
 
   user       User              @relation(fields: [userId], references: [id])
   agentRuns  AgentRun[]
+  aiCallUsages AiCallUsage[]
+  tavilyUsages TavilyUsage[]
 
   @@index([userId, createdAt])
   @@index([status])
@@ -79,8 +81,71 @@ model AgentRun {
   updatedAt     DateTime       @updatedAt
 
   chatSession   ChatSession    @relation(fields: [chatSessionId], references: [id])
+  aiCallUsages  AiCallUsage[]
+  tavilyUsages  TavilyUsage[]
 
   @@index([chatSessionId, createdAt])
+  @@index([status])
+}
+
+model AiCallUsage {
+  id                 String       @id @default(auto()) @map("_id") @db.ObjectId
+  chatSessionId      String?      @db.ObjectId
+  agentRunId         String?      @db.ObjectId
+  agentType          String?
+  callLabel          String?
+  provider           String
+  requestedModelName String?
+  finalModelName     String
+  status             String
+  inputTokens        Int?
+  outputTokens       Int?
+  totalTokens        Int?
+  advancedParams     Json?
+  rawUsage           Json?
+  latencyMs          Int?
+  errorMessage       String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  chatSession        ChatSession? @relation(fields: [chatSessionId], references: [id])
+  agentRun           AgentRun?    @relation(fields: [agentRunId], references: [id])
+
+  @@index([chatSessionId, createdAt])
+  @@index([agentRunId, createdAt])
+  @@index([agentType])
+  @@index([provider])
+  @@index([status])
+}
+
+model TavilyUsage {
+  id                String       @id @default(auto()) @map("_id") @db.ObjectId
+  chatSessionId     String?      @db.ObjectId
+  agentRunId        String?      @db.ObjectId
+  agentType         String?
+  callLabel         String?
+  query             String
+  searchDepth       String
+  topic             String?
+  maxResults        Int?
+  includeAnswer     Boolean?
+  includeRawContent Boolean?
+  includeImages     Boolean?
+  creditsUsed       Int
+  resultCount       Int?
+  status            String
+  latencyMs         Int?
+  errorMessage      String?
+  rawUsage          Json?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  chatSession       ChatSession? @relation(fields: [chatSessionId], references: [id])
+  agentRun          AgentRun?    @relation(fields: [agentRunId], references: [id])
+
+  @@index([chatSessionId, createdAt])
+  @@index([agentRunId, createdAt])
+  @@index([agentType])
   @@index([status])
 }
 

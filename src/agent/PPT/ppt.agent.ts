@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../../ai/ai.service';
+import type { AgentUsageContext } from '../types/agent-usage-context.type';
 
 export type SlideBlueprint = {
   id: number;
@@ -147,24 +148,25 @@ export class PptAgentService {
     requestText: string,
     inputPlan?: SlidePlan,
     onProgress?: (stage: string, message: string, progress: number) => void,
+    usageContext?: AgentUsageContext,
   ): Promise<FinalPptPayload> {
     onProgress?.('categorize', 'Understanding request and presentation intent', 10);
-    const categorized = await this.categorizeAndUnderstandAgent(requestText);
+    const categorized = await this.categorizeAndUnderstandAgent(requestText, usageContext);
 
     onProgress?.('planning', 'Planning slide architecture', 24);
-    const slidePlan = await this.slidePlanningAgent(categorized, inputPlan);
+    const slidePlan = await this.slidePlanningAgent(categorized, inputPlan, usageContext);
 
     onProgress?.('content-map', 'Mapping content for each slide', 42);
-    const mapped = await this.slideContentMapperAgent(slidePlan, categorized);
+    const mapped = await this.slideContentMapperAgent(slidePlan, categorized, usageContext);
 
     onProgress?.('visual-data', 'Extracting chart and visual data', 58);
-    const structuredVisualData = await this.visualDataExtractionAgent(mapped, categorized);
+    const structuredVisualData = await this.visualDataExtractionAgent(mapped, categorized, usageContext);
 
     onProgress?.('illustrations', 'Preparing slide illustrations', 70);
-    const illustrations = await this.illustrationEngineAgent(mapped);
+    const illustrations = await this.illustrationEngineAgent(mapped, usageContext);
 
     onProgress?.('theme', 'Generating presentation theme', 82);
-    const theme = await this.themeEngineAgent(categorized, mapped);
+    const theme = await this.themeEngineAgent(categorized, mapped, usageContext);
 
     onProgress?.('assemble', 'Assembling frontend-ready PPT JSON', 92);
     const slides = this.buildSlides(mapped, structuredVisualData, illustrations);
@@ -230,7 +232,10 @@ export class PptAgentService {
     };
   }
 
-  private async categorizeAndUnderstandAgent(requestText: string): Promise<CategorizedRequest> {
+  private async categorizeAndUnderstandAgent(
+    requestText: string,
+    usageContext?: AgentUsageContext,
+  ): Promise<CategorizedRequest> {
     const prompt = `You are agent-1 of a PPT architecture.
 Task: Categorize and understand the user request.
 Return ONLY valid JSON with this exact shape:
@@ -245,7 +250,7 @@ Return ONLY valid JSON with this exact shape:
 User request:\n${requestText}`;
 
     try {
-      const text = await this.askAi(prompt);
+      const text = await this.askAi(prompt, { ...usageContext, callLabel: 'ppt.categorize' });
       const parsed = this.parseJson<CategorizedRequest>(text);
       if (!parsed || !parsed.topic || !Array.isArray(parsed.keyPoints)) {
         throw new Error('Invalid categorized JSON');
@@ -266,7 +271,11 @@ User request:\n${requestText}`;
     }
   }
 
-  private async slidePlanningAgent(categorized: CategorizedRequest, inputPlan?: SlidePlan): Promise<SlidePlan> {
+  private async slidePlanningAgent(
+    categorized: CategorizedRequest,
+    inputPlan?: SlidePlan,
+    usageContext?: AgentUsageContext,
+  ): Promise<SlidePlan> {
     if (inputPlan?.slides?.length) {
       return inputPlan;
     }
@@ -286,7 +295,7 @@ Constraints:
 Context JSON:\n${JSON.stringify(categorized)}`;
 
     try {
-      const text = await this.askAi(prompt);
+      const text = await this.askAi(prompt, { ...usageContext, callLabel: 'ppt.slidePlanning' });
       const parsed = this.parseJson<SlidePlan>(text);
       if (!parsed || !parsed.title || !Array.isArray(parsed.slides) || parsed.slides.length === 0) {
         throw new Error('Invalid slide plan JSON');
@@ -309,7 +318,11 @@ Context JSON:\n${JSON.stringify(categorized)}`;
     }
   }
 
-  private async slideContentMapperAgent(plan: SlidePlan, categorized: CategorizedRequest): Promise<SlideContentMap[]> {
+  private async slideContentMapperAgent(
+    plan: SlidePlan,
+    categorized: CategorizedRequest,
+    usageContext?: AgentUsageContext,
+  ): Promise<SlideContentMap[]> {
     const results: SlideContentMap[] = [];
 
     for (const slide of plan.slides) {
@@ -332,7 +345,10 @@ Slide JSON:\n${JSON.stringify(slide)}
 Context JSON:\n${JSON.stringify(categorized)}`;
 
       try {
-        const text = await this.askAi(prompt);
+        const text = await this.askAi(prompt, {
+          ...usageContext,
+          callLabel: `ppt.slideContent.${slide.id}`,
+        });
         const content = this.parseJson<SlideContent>(text);
         if (!content || !content.heading || !Array.isArray(content.bullets) || !content.visual) {
           throw new Error('Invalid slide content JSON');
@@ -370,7 +386,10 @@ Context JSON:\n${JSON.stringify(categorized)}`;
     return results;
   }
 
-  private async illustrationEngineAgent(mappedSlides: SlideContentMap[]): Promise<IllustrationAsset[]> {
+  private async illustrationEngineAgent(
+    mappedSlides: SlideContentMap[],
+    usageContext?: AgentUsageContext,
+  ): Promise<IllustrationAsset[]> {
     const prompt = `You are agent-4 illustration engine.
 Task: for each visual key, return a short query phrase for free stock image search.
 Return ONLY valid JSON array in this shape:
@@ -382,7 +401,7 @@ Slides:\n${JSON.stringify(
     )}`;
 
     try {
-      const text = await this.askAi(prompt);
+      const text = await this.askAi(prompt, { ...usageContext, callLabel: 'ppt.illustrations' });
       const queries = this.parseJson<Array<{ slideId: number; visualKey: string; query: string; alt: string }>>(text);
       if (!Array.isArray(queries) || queries.length === 0) {
         throw new Error('Invalid illustration JSON');
@@ -412,6 +431,7 @@ Slides:\n${JSON.stringify(
   private async visualDataExtractionAgent(
     mappedSlides: SlideContentMap[],
     categorized: CategorizedRequest,
+    usageContext?: AgentUsageContext,
   ): Promise<SlideVisualDataMap[]> {
     const prompt = `You are agent-4b visual data extraction engine.
 Task: convert slide text into structured renderable visual data.
@@ -444,7 +464,7 @@ Slides:\n${JSON.stringify(
 Context:\n${JSON.stringify(categorized)}`;
 
     try {
-      const text = await this.askAi(prompt);
+      const text = await this.askAi(prompt, { ...usageContext, callLabel: 'ppt.visualData' });
       const parsed = this.parseJson<SlideVisualDataMap[]>(text);
       if (!Array.isArray(parsed)) {
         throw new Error('Invalid visual structured data JSON');
@@ -461,7 +481,11 @@ Context:\n${JSON.stringify(categorized)}`;
     }
   }
 
-  private async themeEngineAgent(categorized: CategorizedRequest, mappedSlides: SlideContentMap[]): Promise<ThemeSpec> {
+  private async themeEngineAgent(
+    categorized: CategorizedRequest,
+    mappedSlides: SlideContentMap[],
+    usageContext?: AgentUsageContext,
+  ): Promise<ThemeSpec> {
     const prompt = `You are agent-5 theme engine.
 Task: produce a professional presentation color theme.
 Return ONLY valid JSON in this exact shape:
@@ -475,7 +499,7 @@ Return ONLY valid JSON in this exact shape:
 Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type) })}`;
 
     try {
-      const text = await this.askAi(prompt);
+      const text = await this.askAi(prompt, { ...usageContext, callLabel: 'ppt.theme' });
       const theme = this.parseJson<ThemeSpec>(text);
       if (!theme || !theme.backgroundColor || !theme.primaryColor || !theme.textColor) {
         throw new Error('Invalid theme JSON');
@@ -493,14 +517,19 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
     }
   }
 
-  private async askAi(prompt: string): Promise<string> {
-    const model = process.env.PPT_AGENT_MODEL ?? process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-3-5-sonnet-20240620-v1:0';
-    const result = await this.aiService.generateWithBedrock(prompt, model, {
-      inferenceConfig: {
-        temperature: 0.2,
-        maxTokens: 4000,
+  private async askAi(prompt: string, usageContext?: AgentUsageContext): Promise<string> {
+    const model = process.env.PPT_AGENT_MODEL ?? process.env.BEDROCK_MODEL_ID ?? 'deepseek.v3-v1:0';
+    const result = await this.aiService.generateWithBedrock(
+      prompt,
+      model,
+      {
+        inferenceConfig: {
+          temperature: 0.2,
+          maxTokens: 4000,
+        },
       },
-    });
+      usageContext,
+    );
     return result.text;
   }
 

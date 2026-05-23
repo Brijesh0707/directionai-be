@@ -3,6 +3,7 @@ import { FinalPptPayload, PptAgentService } from './PPT/ppt.agent';
 import { FinalMarketingPayload, MarketingAgent } from './Marketing/marketing.agent';
 import { FinalResearchPayload, ResearchAgentService } from './Research/research';
 import { DevelopmentAgent, FinalDevelopmentPayload } from './Development/development.agent';
+import type { AgentUsageContext } from './types/agent-usage-context.type';
 
 export type AgentType = 'PPT' | 'RESEARCH' | 'MARKETING' | 'DEVELOPMENT';
 
@@ -34,6 +35,7 @@ export class AgentService {
     agentType: string,
     text: string,
     onProgress?: (event: AgentProgressEvent) => void,
+    usageContext?: AgentUsageContext,
   ): Promise<AgentResult> {
     const normalizedAgentType = agentType?.trim().toUpperCase();
     const normalizedText = text?.trim();
@@ -59,16 +61,25 @@ export class AgentService {
     switch (normalizedAgentType) {
       case 'PPT':
         this.logger.log('Routing request to PptAgentService');
-        return this.pptAgentService.runPptAgentPipeline(normalizedText, undefined, emit);
+        return this.pptAgentService.runPptAgentPipeline(normalizedText, undefined, emit, {
+          ...usageContext,
+          agentType: normalizedAgentType,
+        });
       case 'RESEARCH':
         this.logger.log('Routing request to ResearchAgentService');
         return this.researchAgentService.runResearchAgentPipeline(normalizedText, emit);
       case 'MARKETING':
         this.logger.log('Routing request to MarketingAgent');
-        return this.marketingAgent.runMarketingAgentPipeline(normalizedText, emit);
+        return this.marketingAgent.runMarketingAgentPipeline(normalizedText, emit, {
+          ...usageContext,
+          agentType: normalizedAgentType,
+        });
       case 'DEVELOPMENT':
         this.logger.log('Routing request to DevelopmentAgent');
-        return this.developmentAgent.runDevelopmentAgentPipeline(normalizedText, emit);
+        return this.developmentAgent.runDevelopmentAgentPipeline(normalizedText, emit, {
+          ...usageContext,
+          agentType: normalizedAgentType,
+        });
       default:
         throw new BadRequestException(
           `Unsupported agent type: ${agentType}. Supported types: PPT, RESEARCH, MARKETING, DEVELOPMENT`,

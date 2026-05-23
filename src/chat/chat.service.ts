@@ -189,6 +189,10 @@ export class ChatService {
             progress: this.computeAgentAwareProgress(completed, total, event.progress),
             status: 'running',
           });
+        }, {
+          chatSessionId: chatId,
+          agentRunId: run.id,
+          agentType,
         });
         const memorySummary = this.buildAgentSummary(agentType, result);
         const resultWithMemory = this.attachSummaryToResult(result, memorySummary);
@@ -292,6 +296,49 @@ export class ChatService {
     }
 
     return run;
+  }
+
+  async getUsage(userId: string, chatId: string) {
+    await this.getSession(userId, chatId);
+
+    const [aiCalls, tavilyUsages] = await this.prisma.$transaction([
+      this.prisma.aiCallUsage.findMany({
+        where: { chatSessionId: chatId },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.tavilyUsage.findMany({
+        where: { chatSessionId: chatId },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const aiTotals = aiCalls.reduce(
+      (totals, call) => ({
+        inputTokens: totals.inputTokens + (call.inputTokens ?? 0),
+        outputTokens: totals.outputTokens + (call.outputTokens ?? 0),
+        totalTokens: totals.totalTokens + (call.totalTokens ?? 0),
+        calls: totals.calls + 1,
+      }),
+      { inputTokens: 0, outputTokens: 0, totalTokens: 0, calls: 0 },
+    );
+
+    const tavilyTotals = tavilyUsages.reduce(
+      (totals, usage) => ({
+        creditsUsed: totals.creditsUsed + usage.creditsUsed,
+        calls: totals.calls + 1,
+      }),
+      { creditsUsed: 0, calls: 0 },
+    );
+
+    return {
+      chatId,
+      totals: {
+        ai: aiTotals,
+        tavily: tavilyTotals,
+      },
+      aiCalls,
+      tavilyUsages,
+    };
   }
 
   private toJsonInput(value: unknown): Prisma.InputJsonValue {

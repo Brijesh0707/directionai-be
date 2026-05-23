@@ -7,6 +7,7 @@ import { ClaudeAiService } from './services/claude-ai.service';
 import { GrokAiService } from './services/grok-ai.service';
 import { GeminiAiService } from './services/gemini-ai.service';
 import { AiProviderResponse } from './types/ai-provider-response.type';
+import type { AgentUsageContext } from '../agent/types/agent-usage-context.type';
 
 type ProviderKey = 'openai' | 'bedrock' | 'claude' | 'grok' | 'gemini';
 
@@ -51,6 +52,7 @@ export class AiService {
     prompt: string,
     modelName: string,
     advancedParams?: Record<string, unknown>,
+    usageContext?: AgentUsageContext,
   ): Promise<{ text: string; modelName: string; provider: ProviderKey; auditId: string }> {
     const primaryProvider = this.resolveProviderFromModel(modelName);
     const fallbackOrder = this.getFallbackOrder(primaryProvider);
@@ -108,6 +110,17 @@ export class AiService {
           },
         });
 
+        await this.recordAiCallUsage({
+          usageContext,
+          provider,
+          requestedModelName: modelName,
+          finalModelName: response.providerModelName,
+          status: 'success',
+          response,
+          advancedParams,
+          latencyMs: endedAt.getTime() - startedAt.getTime(),
+        });
+
         return {
           text: response.text,
           modelName: response.providerModelName,
@@ -149,6 +162,16 @@ export class AiService {
       },
     });
 
+    await this.recordAiCallUsage({
+      usageContext,
+      provider: primaryProvider,
+      requestedModelName: modelName,
+      finalModelName: modelName,
+      status: 'failed',
+      advancedParams,
+      errorMessage: lastError instanceof Error ? lastError.message : 'All AI providers failed',
+    });
+
     throw lastError ?? new Error('All AI providers failed to generate a response.');
   }
 
@@ -156,40 +179,82 @@ export class AiService {
     prompt: string,
     modelName?: string,
     advancedParams?: Record<string, unknown>,
+    usageContext?: AgentUsageContext,
   ): Promise<AiProviderResponse> {
-    return this.openAiService.generateFromPrompt(prompt, modelName, advancedParams);
+    return this.generateWithDirectProvider('openai', prompt, modelName, advancedParams, usageContext);
   }
 
   async generateWithBedrock(
     prompt: string,
     modelName?: string,
     advancedParams?: Record<string, unknown>,
+    usageContext?: AgentUsageContext,
   ): Promise<AiProviderResponse> {
-    return this.bedrockAiService.generateFromPrompt(prompt, modelName, advancedParams);
+    return this.generateWithDirectProvider('bedrock', prompt, modelName, advancedParams, usageContext);
   }
 
   async generateWithClaude(
     prompt: string,
     modelName?: string,
     advancedParams?: Record<string, unknown>,
+    usageContext?: AgentUsageContext,
   ): Promise<AiProviderResponse> {
-    return this.claudeAiService.generateFromPrompt(prompt, modelName, advancedParams);
+    return this.generateWithDirectProvider('claude', prompt, modelName, advancedParams, usageContext);
   }
 
   async generateWithGrok(
     prompt: string,
     modelName?: string,
     advancedParams?: Record<string, unknown>,
+    usageContext?: AgentUsageContext,
   ): Promise<AiProviderResponse> {
-    return this.grokAiService.generateFromPrompt(prompt, modelName, advancedParams);
+    return this.generateWithDirectProvider('grok', prompt, modelName, advancedParams, usageContext);
   }
 
   async generateWithGemini(
     prompt: string,
     modelName?: string,
     advancedParams?: Record<string, unknown>,
+    usageContext?: AgentUsageContext,
   ): Promise<AiProviderResponse> {
-    return this.geminiAiService.generateFromPrompt(prompt, modelName, advancedParams);
+    return this.generateWithDirectProvider('gemini', prompt, modelName, advancedParams, usageContext);
+  }
+
+  private async generateWithDirectProvider(
+    provider: ProviderKey,
+    prompt: string,
+    modelName?: string,
+    advancedParams?: Record<string, unknown>,
+    usageContext?: AgentUsageContext,
+  ): Promise<AiProviderResponse> {
+    const startedAt = Date.now();
+
+    try {
+      const response = await this.callProvider(provider, prompt, modelName, advancedParams);
+      await this.recordAiCallUsage({
+        usageContext,
+        provider,
+        requestedModelName: modelName,
+        finalModelName: response.providerModelName,
+        status: 'success',
+        response,
+        advancedParams,
+        latencyMs: Date.now() - startedAt,
+      });
+      return response;
+    } catch (error) {
+      await this.recordAiCallUsage({
+        usageContext,
+        provider,
+        requestedModelName: modelName,
+        finalModelName: modelName ?? provider,
+        status: 'failed',
+        advancedParams,
+        latencyMs: Date.now() - startedAt,
+        errorMessage: error instanceof Error ? error.message : 'Unknown AI provider error',
+      });
+      throw error;
+    }
   }
 
   private async callProvider(
@@ -200,17 +265,57 @@ export class AiService {
   ): Promise<AiProviderResponse> {
     switch (provider) {
       case 'openai':
-        return this.generateWithOpenAi(prompt, modelName, advancedParams);
+        return this.openAiService.generateFromPrompt(prompt, modelName, advancedParams);
       case 'bedrock':
-        return this.generateWithBedrock(prompt, modelName, advancedParams);
+        return this.bedrockAiService.generateFromPrompt(prompt, modelName, advancedParams);
       case 'claude':
-        return this.generateWithClaude(prompt, modelName, advancedParams);
+        return this.claudeAiService.generateFromPrompt(prompt, modelName, advancedParams);
       case 'grok':
-        return this.generateWithGrok(prompt, modelName, advancedParams);
+        return this.grokAiService.generateFromPrompt(prompt, modelName, advancedParams);
       case 'gemini':
-        return this.generateWithGemini(prompt, modelName, advancedParams);
+        return this.geminiAiService.generateFromPrompt(prompt, modelName, advancedParams);
       default:
         throw new Error(`Unsupported AI provider: ${provider}`);
+    }
+  }
+
+  private async recordAiCallUsage(options: {
+    usageContext?: AgentUsageContext;
+    provider: ProviderKey;
+    requestedModelName?: string;
+    finalModelName: string;
+    status: 'success' | 'failed';
+    response?: AiProviderResponse;
+    advancedParams?: Record<string, unknown>;
+    latencyMs?: number;
+    errorMessage?: string;
+  }) {
+    const context = options.usageContext;
+
+    try {
+      await this.prisma.aiCallUsage.create({
+        data: {
+          chatSessionId: context?.chatSessionId,
+          agentRunId: context?.agentRunId,
+          agentType: context?.agentType,
+          callLabel: context?.callLabel,
+          provider: options.provider,
+          requestedModelName: options.requestedModelName,
+          finalModelName: options.finalModelName,
+          status: options.status,
+          inputTokens: options.response?.inputTokens,
+          outputTokens: options.response?.outputTokens,
+          totalTokens: options.response?.totalTokens,
+          advancedParams: this.toJsonInput(options.advancedParams),
+          rawUsage: this.toJsonInput(options.response?.rawUsage),
+          latencyMs: options.latencyMs,
+          errorMessage: options.errorMessage,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record AI usage: ${error instanceof Error ? error.message : 'unknown'}`,
+      );
     }
   }
 

@@ -20,7 +20,7 @@ export class BedrockAiService {
           : undefined,
     });
 
-    const model = process.env.BEDROCK_MODEL_ID ?? 'deepseek.v3-v1:0';
+    const model = modelName ?? process.env.BEDROCK_MODEL_ID ?? 'deepseek.v3-v1:0';
     const command = new ConverseCommand({
       modelId: model,
       messages: [

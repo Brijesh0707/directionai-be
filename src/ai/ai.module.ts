@@ -6,8 +6,10 @@ import { BedrockAiService } from './services/bedrock-ai.service';
 import { ClaudeAiService } from './services/claude-ai.service';
 import { GrokAiService } from './services/grok-ai.service';
 import { GeminiAiService } from './services/gemini-ai.service';
+import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
+  imports: [PrismaModule],
   controllers: [AiController],
   providers: [
     AiService,

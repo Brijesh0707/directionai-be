@@ -8,9 +8,10 @@ import { ResearchAgentService } from './Research/research';
 import { MarketResearchService } from './Research/SearchAgent/market.research';
 import { MarketingAgent } from './Marketing/marketing.agent';
 import { DevelopmentAgent } from './Development/development.agent';
+import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
-  imports: [AiModule],
+  imports: [AiModule, PrismaModule],
   controllers: [AgentController, ResearchTestController],
   providers: [
     AgentService,
