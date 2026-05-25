@@ -14,6 +14,7 @@ import { AuthService } from './auth.service';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { LoginDto } from './dto/login.dto';
 import { OnboardingDto } from './dto/onboarding.dto';
+import { PurchasePlanDto } from './dto/purchase-plan.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -62,5 +63,17 @@ export class AuthController {
   @Patch('onboarding')
   onboarding(@Req() req: Request & { user: AuthUser }, @Body() dto: OnboardingDto) {
     return this.authService.updateOnboarding(req.user.sub, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('plans')
+  plans() {
+    return this.authService.getPlans();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('plans/purchase')
+  purchasePlan(@Req() req: Request & { user: AuthUser }, @Body() dto: PurchasePlanDto) {
+    return this.authService.purchasePlan(req.user.sub, dto.planCode);
   }
 }

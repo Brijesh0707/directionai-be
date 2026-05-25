@@ -45,6 +45,7 @@ export class ChatService {
   async createSession(userId: string, idea: string, title?: string) {
     const cleanIdea = idea?.trim();
     if (!cleanIdea) throw new BadRequestException('idea is required');
+    await this.assertUserCanCreateProject(userId);
 
     const normalizedTitle = (title?.trim() || cleanIdea.split(/[.!?]/)[0] || 'Untitled Project').slice(0, 80);
 
@@ -60,6 +61,29 @@ export class ChatService {
         agentRuns: true,
       },
     });
+  }
+
+  async getProjectEntitlement(userId: string) {
+    const [user, projectCount] = await this.prisma.$transaction([
+      this.prisma.user.findUnique({ where: { id: userId } }),
+      this.prisma.chatSession.count({ where: { userId } }),
+    ]);
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const freeRemaining = Math.max(0, 1 - projectCount);
+    const paidRemaining = Math.max(0, user.projectCredits);
+    const remainingProjects = freeRemaining + paidRemaining;
+
+    return {
+      planTier: user.planTier,
+      freeProjectsIncluded: 1,
+      projectsCreated: projectCount,
+      paidCreditsRemaining: paidRemaining,
+      remainingProjects,
+      canCreateProject: remainingProjects > 0,
+      note: 'All 4 agents run on every project. Free tier includes only first project.',
+    };
   }
 
   async listSessions(userId: string) {
@@ -361,6 +385,31 @@ export class ChatService {
     this.getStream(chatId).next({
       ...payload,
       timestamp: new Date().toISOString(),
+    });
+  }
+
+  private async assertUserCanCreateProject(userId: string) {
+    const [user, projectCount] = await this.prisma.$transaction([
+      this.prisma.user.findUnique({ where: { id: userId } }),
+      this.prisma.chatSession.count({ where: { userId } }),
+    ]);
+
+    if (!user) throw new NotFoundException('User not found');
+    if (projectCount < 1) return;
+
+    if (user.projectCredits <= 0) {
+      throw new ForbiddenException(
+        'Free plan includes only 1 project. Buy a paid project pack to create the next project.',
+      );
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        projectCredits: {
+          decrement: 1,
+        },
+      },
     });
   }
 

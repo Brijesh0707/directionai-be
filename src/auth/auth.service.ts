@@ -19,6 +19,22 @@ import { RegisterDto } from './dto/register.dto';
 export class AuthService {
   private readonly googleClient = new OAuth2Client();
   private readonly logger = new Logger(AuthService.name);
+  private readonly projectPlans = {
+    PROJECT_20: {
+      code: 'PROJECT_20',
+      name: '20 Project Pack',
+      projects: 20,
+      priceInr: 500,
+      pricePerProjectInr: 25,
+    },
+    PROJECT_30: {
+      code: 'PROJECT_30',
+      name: '30 Project Pack',
+      projects: 30,
+      priceInr: 750,
+      pricePerProjectInr: 25,
+    },
+  } as const;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -152,6 +168,43 @@ export class AuthService {
     });
 
     return { user: this.sanitizeUser(user), message: 'Onboarding saved' };
+  }
+
+  getPlans() {
+    return {
+      free: {
+        name: 'Free',
+        includedProjects: 1,
+        note: 'First project is free and includes all 4 agents.',
+      },
+      paid: Object.values(this.projectPlans),
+      pricingBasis: {
+        operationalCostPerProjectInr: 20,
+        marginPerProjectInr: 5,
+        billedPerProjectInr: 25,
+      },
+    };
+  }
+
+  async purchasePlan(userId: string, planCode: 'PROJECT_20' | 'PROJECT_30') {
+    const selectedPlan = this.projectPlans[planCode];
+    if (!selectedPlan) throw new BadRequestException('Invalid plan code');
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        planTier: 'project_bundle',
+        projectCredits: {
+          increment: selectedPlan.projects,
+        },
+      },
+    });
+
+    return {
+      message: `${selectedPlan.name} activated successfully.`,
+      purchased: selectedPlan,
+      user: this.sanitizeUser(user),
+    };
   }
 
   private async buildAuthResponse(user: User) {

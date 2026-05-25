@@ -12,6 +12,11 @@ enum AuthProvider {
   google
 }
 
+enum UserPlanTier {
+  free
+  project_bundle
+}
+
 enum ChatSessionStatus {
   draft
   running
@@ -40,6 +45,8 @@ model User {
   onboardingSource   String?
   onboardingGoal     String?
   onboardingStage    String?
+  planTier           UserPlanTier @default(free)
+  projectCredits     Int          @default(0)
   refreshTokenHash   String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt

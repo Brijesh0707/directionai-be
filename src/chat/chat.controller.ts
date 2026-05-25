@@ -41,6 +41,12 @@ export class ChatController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('entitlement')
+  getEntitlement(@Req() req: Request & { user: AuthUser }) {
+    return this.chatService.getProjectEntitlement(req.user.sub);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('sessions/summary')
   listSessionSummaries(
     @Req() req: Request & { user: AuthUser },
