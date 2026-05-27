@@ -15,6 +15,7 @@ async function bootstrap() {
       'http://localhost:8080', // Common dev port
       'http://localhost:5173', // Vite default
       'https://yourdomain.com', // Add your production domain
+      "https://directionai.sourcesparktech.in"
       // Add more origins as needed
     ],
     credentials: true,
