@@ -435,7 +435,7 @@ export class ChatService {
     lines.push(`### ${agentType} Summary`);
 
     if (agentType === 'RESEARCH') {
-      const merged = this.asString(root?.mergedResponse);
+      const merged = this.parseResearchMergedResponse(root?.mergedResponse);
       const summary = this.asRecord(root?.summarizedRequest);
       const topic = this.asString(summary?.topic);
       const audience = this.asString(summary?.audience);
@@ -445,7 +445,12 @@ export class ChatService {
       if (audience) lines.push(`- Audience: ${audience}`);
       if (intent) lines.push(`- Objective: ${intent}`);
       if (competitors.length) lines.push(`- Competitor set: ${competitors.join(', ')}`);
-      if (merged) lines.push(`- Key findings: ${merged}`);
+      const keyFindings = this.extractResearchKeyFindings(merged).slice(0, 4);
+      if (keyFindings.length) {
+        lines.push(`- Key findings: ${keyFindings.join(' | ')}`);
+      } else {
+        lines.push('- Key findings: Research report generated. Open report for detailed section breakdown.');
+      }
       return lines.join('\n');
     }
 
@@ -528,6 +533,68 @@ export class ChatService {
   private asStringArray(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
     return value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()));
+  }
+
+  private parseResearchMergedResponse(value: unknown): Record<string, unknown> | null {
+    if (!value) return null;
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    if (typeof value !== 'string') return null;
+
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return this.asRecord(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  private extractResearchKeyFindings(merged: Record<string, unknown> | null): string[] {
+    if (!merged) return [];
+
+    const findings: string[] = [];
+    const candidateSections = [
+      this.asRecord(merged.marketResearchData)?.marketResearch,
+      this.asRecord(merged.marketResearchData)?.competitorResearch,
+      this.asRecord(merged.marketResearchData)?.trendResearch,
+      this.asRecord(merged.marketSizingData)?.tam,
+      this.asRecord(merged.customerInsightsData)?.painPoints,
+      this.asRecord(merged.startupData)?.startupValidation,
+      this.asRecord(merged.strategicAnalysisData)?.swot,
+    ];
+
+    for (const section of candidateSections) {
+      const answer = this.extractSectionAnswer(section);
+      if (answer) findings.push(answer);
+      if (findings.length >= 4) break;
+    }
+
+    return findings;
+  }
+
+  private extractSectionAnswer(value: unknown): string | null {
+    const section = this.asRecord(value);
+    if (!section) return null;
+    const data = section.data;
+    if (!data) return null;
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        const answer = this.asString(this.asRecord(item)?.answer);
+        if (answer) return this.compactText(answer, 180);
+      }
+      return null;
+    }
+
+    const answer = this.asString(this.asRecord(data)?.answer);
+    return answer ? this.compactText(answer, 180) : null;
+  }
+
+  private compactText(value: string, maxLength: number): string {
+    const oneLine = value.replace(/\s+/g, ' ').trim();
+    if (oneLine.length <= maxLength) return oneLine;
+    return `${oneLine.slice(0, maxLength - 3).trimEnd()}...`;
   }
 
 }
