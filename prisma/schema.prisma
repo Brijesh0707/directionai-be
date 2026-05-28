@@ -57,8 +57,12 @@ model User {
 model ChatSession {
   id         String            @id @default(auto()) @map("_id") @db.ObjectId
   userId     String            @db.ObjectId
+  rawIdea    String?
   title      String
   idea       String
+  projectCategory String?
+  recommendedFirstAgent String?
+  memoryJson Json?
   status     ChatSessionStatus @default(draft)
   progress   Int               @default(0)
   createdAt  DateTime          @default(now())

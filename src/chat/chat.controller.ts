@@ -20,6 +20,7 @@ import { ChatService } from './chat.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { ListSessionSummariesDto } from './dto/list-session-summaries.dto';
 import { RunAgentsDto } from './dto/run-agents.dto';
+import { SendChatMessageDto } from './dto/send-chat-message.dto';
 
 @Controller('chat')
 export class ChatController {
@@ -69,6 +70,16 @@ export class ChatController {
     @Body() dto: RunAgentsDto,
   ) {
     return this.chatService.runAgents(req.user.sub, chatId, dto.agentTypes);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('sessions/:chatId/message')
+  sendMessage(
+    @Req() req: Request & { user: AuthUser },
+    @Param('chatId') chatId: string,
+    @Body() dto: SendChatMessageDto,
+  ) {
+    return this.chatService.sendMessage(req.user.sub, chatId, dto.message);
   }
 
   @UseGuards(JwtAuthGuard)

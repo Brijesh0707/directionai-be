@@ -9,6 +9,7 @@ import { MarketResearchService } from './Research/SearchAgent/market.research';
 import { MarketingAgent } from './Marketing/marketing.agent';
 import { DevelopmentAgent } from './Development/development.agent';
 import { PrismaModule } from '../prisma/prisma.module';
+import { DirectionAiAgentService } from './directionai.agent';
 
 @Module({
   imports: [AiModule, PrismaModule],
@@ -20,6 +21,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     MarketResearchService,
     MarketingAgent,
     DevelopmentAgent,
+    DirectionAiAgentService,
   ],
   exports: [
     AgentService,
@@ -28,6 +30,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     MarketResearchService,
     MarketingAgent,
     DevelopmentAgent,
+    DirectionAiAgentService,
   ],
 })
 export class AgentModule {}

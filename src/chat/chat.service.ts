@@ -7,6 +7,12 @@ import {
 import { AgentRunStatus, ChatSessionStatus, Prisma } from '@prisma/client';
 import { Subject } from 'rxjs';
 import { AgentService } from '../agent/agent.service';
+import { DirectionAiAgentService } from '../agent/directionai.agent';
+import type {
+  DirectionAiConversationItem,
+  DirectionAiMemory,
+  DirectionAiResponse,
+} from '../agent/types/directionai-memory.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListSessionSummariesDto } from './dto/list-session-summaries.dto';
 
@@ -28,6 +34,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly agentService: AgentService,
+    private readonly directionAiAgent: DirectionAiAgentService,
   ) {}
 
   private getStream(chatId: string): Subject<ChatStreamEvent> {
@@ -49,13 +56,38 @@ export class ChatService {
 
     const normalizedTitle = (title?.trim() || cleanIdea.split(/[.!?]/)[0] || 'Untitled Project').slice(0, 80);
 
-    return this.prisma.chatSession.create({
+    const session = await this.prisma.chatSession.create({
       data: {
         userId,
+        rawIdea: cleanIdea,
         idea: cleanIdea,
         title: normalizedTitle,
         status: ChatSessionStatus.draft,
         progress: 5,
+      },
+      include: {
+        agentRuns: true,
+      },
+    });
+
+    const directionResponse = await this.directionAiAgent.analyze(cleanIdea, null, {
+      chatSessionId: session.id,
+      agentType: 'DIRECTIONAI',
+      callLabel: 'directionai.intake',
+    });
+
+    const directionMemory = this.buildInitialDirectionMemory(cleanIdea, directionResponse);
+    const refinedTitle = this.normalizeProjectName(directionResponse.projectName);
+    const refinedDescription = this.normalizeProjectDescription(directionResponse.projectDescription);
+
+    return this.prisma.chatSession.update({
+      where: { id: session.id },
+      data: {
+        title: refinedTitle,
+        idea: refinedDescription,
+        projectCategory: directionResponse.projectCategory,
+        recommendedFirstAgent: directionResponse.recommendedFirstAgent,
+        memoryJson: this.toJsonInput(directionMemory),
       },
       include: {
         agentRuns: true,
@@ -157,6 +189,55 @@ export class ChatService {
     return session;
   }
 
+  async sendMessage(userId: string, chatId: string, message: string) {
+    const session = await this.getSession(userId, chatId);
+    const cleanMessage = message?.trim();
+
+    if (!cleanMessage) {
+      throw new BadRequestException('message is required');
+    }
+
+    const memory = this.readDirectionMemory(session.memoryJson);
+    const updatedConversation = [
+      ...memory.conversation,
+      this.createConversationItem('user', 'reply', cleanMessage),
+    ];
+
+    const directionResponse = await this.directionAiAgent.analyze(cleanMessage, {
+      ...memory,
+      conversation: updatedConversation,
+      lastUpdatedAt: new Date().toISOString(),
+    }, {
+      chatSessionId: chatId,
+      agentType: 'DIRECTIONAI',
+      callLabel: 'directionai.reply',
+    });
+
+    const nextMemory = this.applyDirectionResponse(memory, cleanMessage, directionResponse);
+
+    const refinedTitle = this.normalizeProjectName(directionResponse.projectName || session.title);
+    const refinedDescription = this.normalizeProjectDescription(directionResponse.projectDescription || session.idea);
+
+    const updatedSession = await this.prisma.chatSession.update({
+      where: { id: chatId },
+      data: {
+        title: refinedTitle,
+        idea: refinedDescription,
+        projectCategory: directionResponse.projectCategory || session.projectCategory,
+        recommendedFirstAgent: directionResponse.recommendedFirstAgent || session.recommendedFirstAgent,
+        memoryJson: this.toJsonInput(nextMemory),
+      },
+      include: {
+        agentRuns: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    return {
+      message: directionResponse.assistantMessage,
+      session: updatedSession,
+    };
+  }
+
   async runAgents(userId: string, chatId: string, agentTypes: string[]) {
     const session = await this.getSession(userId, chatId);
 
@@ -220,6 +301,7 @@ export class ChatService {
         });
         const memorySummary = this.buildAgentSummary(agentType, result);
         const resultWithMemory = this.attachSummaryToResult(result, memorySummary);
+        await this.appendAgentSummaryToMemory(chatId, agentType, memorySummary);
 
         await this.prisma.agentRun.update({
           where: { id: run.id },
@@ -388,6 +470,192 @@ export class ChatService {
     });
   }
 
+  private buildInitialDirectionMemory(
+    rawIdea: string,
+    response: DirectionAiResponse,
+  ): DirectionAiMemory {
+    const now = new Date().toISOString();
+    return {
+      rawIdea,
+      project: {
+        name: this.normalizeProjectName(response.projectName),
+        category: response.projectCategory,
+        description: this.normalizeProjectDescription(response.projectDescription),
+        businessType: response.businessType,
+        audience: response.audience,
+        objective: response.objective,
+        recommendedFirstAgent: response.recommendedFirstAgent,
+        recommendationReason: response.recommendationReason,
+        confidence: response.confidence,
+      },
+      conversation: [
+        this.createConversationItem('user', 'intake', rawIdea, now),
+        this.createConversationItem('assistant', response.clarificationNeeded ? 'clarification' : 'recommendation', response.assistantMessage, now),
+      ],
+      pendingQuestions: response.clarificationQuestions ?? [],
+      agentSummaries: {},
+      lastUpdatedAt: now,
+    };
+  }
+
+  private readDirectionMemory(memoryJson: Prisma.JsonValue | null | undefined): DirectionAiMemory {
+    if (!memoryJson || typeof memoryJson !== 'object' || Array.isArray(memoryJson)) {
+      return {
+        project: {
+          name: 'Untitled Project',
+          category: 'other',
+          description: 'DirectionAI is refining the project brief.',
+        },
+        conversation: [],
+        pendingQuestions: [],
+        agentSummaries: {},
+        lastUpdatedAt: new Date().toISOString(),
+      };
+    }
+
+    const raw = memoryJson as Record<string, unknown>;
+    const projectRaw = this.asRecord(raw.project);
+    const conversationRaw = Array.isArray(raw.conversation) ? raw.conversation : [];
+    const pendingRaw = Array.isArray(raw.pendingQuestions) ? raw.pendingQuestions : [];
+    const summariesRaw = this.asRecord(raw.agentSummaries);
+
+    return {
+      rawIdea: this.asString(raw.rawIdea),
+      project: {
+        name: this.asString(projectRaw?.name) || 'Untitled Project',
+        category: this.asString(projectRaw?.category) || 'other',
+        description:
+          this.asString(projectRaw?.description) || 'DirectionAI is refining the project brief.',
+        businessType: this.asString(projectRaw?.businessType),
+        audience: this.asString(projectRaw?.audience),
+        objective: this.asString(projectRaw?.objective),
+        recommendedFirstAgent: this.asString(projectRaw?.recommendedFirstAgent),
+        recommendationReason: this.asString(projectRaw?.recommendationReason),
+        confidence: this.asNumber(projectRaw?.confidence),
+      },
+      conversation: conversationRaw
+        .map((entry) => this.asConversationItem(entry))
+        .filter((entry): entry is DirectionAiConversationItem => Boolean(entry)),
+      pendingQuestions: pendingRaw
+        .map((item) => this.asString(item))
+        .filter((item): item is string => Boolean(item)),
+      agentSummaries: Object.entries(summariesRaw ?? {}).reduce<Record<string, string>>((acc, [key, value]) => {
+        const summary = this.asString(value);
+        if (summary) acc[key] = summary;
+        return acc;
+      }, {}),
+      lastUpdatedAt: this.asString(raw.lastUpdatedAt) || new Date().toISOString(),
+    };
+  }
+
+  private applyDirectionResponse(
+    current: DirectionAiMemory,
+    userMessage: string,
+    response: DirectionAiResponse,
+  ): DirectionAiMemory {
+    const now = new Date().toISOString();
+    const conversation = [
+      ...current.conversation,
+      this.createConversationItem('user', 'reply', userMessage, now),
+      this.createConversationItem(
+        'assistant',
+        response.clarificationNeeded ? 'clarification' : 'recommendation',
+        response.assistantMessage,
+        now,
+      ),
+    ];
+
+    return {
+      rawIdea: current.rawIdea,
+      project: {
+        name: this.normalizeProjectName(response.projectName || current.project.name),
+        category: response.projectCategory || current.project.category,
+        description: this.normalizeProjectDescription(response.projectDescription || current.project.description),
+        businessType: response.businessType || current.project.businessType,
+        audience: response.audience || current.project.audience,
+        objective: response.objective || current.project.objective,
+        recommendedFirstAgent: response.recommendedFirstAgent || current.project.recommendedFirstAgent,
+        recommendationReason: response.recommendationReason || current.project.recommendationReason,
+        confidence: response.confidence ?? current.project.confidence,
+      },
+      conversation,
+      pendingQuestions: response.clarificationQuestions ?? [],
+      agentSummaries: current.agentSummaries,
+      lastUpdatedAt: now,
+    };
+  }
+
+  private async appendAgentSummaryToMemory(chatId: string, agentType: string, summary: string) {
+    const session = await this.prisma.chatSession.findUnique({
+      where: { id: chatId },
+      select: { memoryJson: true },
+    });
+
+    const memory = this.readDirectionMemory(session?.memoryJson);
+    const now = new Date().toISOString();
+    const normalizedAgentType = agentType.trim().toUpperCase();
+    const nextMemory: DirectionAiMemory = {
+      ...memory,
+      conversation: [
+        ...memory.conversation,
+        this.createConversationItem('assistant', 'summary', summary, now),
+      ],
+      agentSummaries: {
+        ...memory.agentSummaries,
+        [normalizedAgentType]: summary,
+      },
+      lastUpdatedAt: now,
+    };
+
+    await this.prisma.chatSession.update({
+      where: { id: chatId },
+      data: {
+        memoryJson: this.toJsonInput(nextMemory),
+      },
+    });
+  }
+
+  private createConversationItem(
+    role: 'user' | 'assistant',
+    kind: DirectionAiConversationItem['kind'],
+    content: string,
+    createdAt = new Date().toISOString(),
+  ): DirectionAiConversationItem {
+    return {
+      role,
+      kind,
+      content,
+      createdAt,
+    };
+  }
+
+  private asConversationItem(value: unknown): DirectionAiConversationItem | null {
+    const record = this.asRecord(value);
+    if (!record) return null;
+    const role = this.asString(record.role) as 'user' | 'assistant' | undefined;
+    const kind = this.asString(record.kind) as DirectionAiConversationItem['kind'] | undefined;
+    const content = this.asString(record.content);
+    if (!role || !kind || !content) return null;
+    return {
+      role,
+      kind,
+      content,
+      createdAt: this.asString(record.createdAt) || new Date().toISOString(),
+    };
+  }
+
+  private normalizeProjectName(name?: string) {
+    const normalized = name?.trim() || 'Untitled Project';
+    return normalized.slice(0, 80);
+  }
+
+  private normalizeProjectDescription(description?: string) {
+    const normalized =
+      description?.trim() ||
+      'DirectionAI is refining the project brief into a clear business plan and execution path.';
+    return normalized;
+  }
+
   private async assertUserCanCreateProject(userId: string) {
     const [user, projectCount] = await this.prisma.$transaction([
       this.prisma.user.findUnique({ where: { id: userId } }),
@@ -526,8 +794,19 @@ export class ChatService {
       : null;
   }
 
-  private asString(value: unknown): string | null {
-    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  private asString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  }
+
+  private asNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
   }
 
   private asStringArray(value: unknown): string[] {

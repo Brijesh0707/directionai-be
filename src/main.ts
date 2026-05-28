@@ -6,8 +6,15 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
   });
-  
-  // Proper CORS configuration
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidUnknownValues: false,
+    }),
+  );
+
   app.enableCors({
     origin: [
       'http://localhost:3010',
@@ -15,7 +22,7 @@ async function bootstrap() {
       'http://localhost:8080', // Common dev port
       'http://localhost:5173', // Vite default
       'https://yourdomain.com', // Add your production domain
-      "https://directionai.sourcesparktech.in"
+      'https://directionai.sourcesparktech.in',
       // Add more origins as needed
     ],
     credentials: true,
