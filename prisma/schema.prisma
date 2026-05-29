@@ -62,6 +62,8 @@ model ChatSession {
   idea       String
   projectCategory String?
   recommendedFirstAgent String?
+  isPublic   Boolean           @default(false)
+  publicShareToken String?
   memoryJson Json?
   status     ChatSessionStatus @default(draft)
   progress   Int               @default(0)
@@ -75,6 +77,7 @@ model ChatSession {
 
   @@index([userId, createdAt])
   @@index([status])
+  @@index([publicShareToken])
 }
 
 model AgentRun {
@@ -88,6 +91,8 @@ model AgentRun {
   errorMessage  String?
   reportPath    String?
   reportName    String?
+  isPublic      Boolean        @default(false)
+  publicShareToken String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -97,6 +102,7 @@ model AgentRun {
 
   @@index([chatSessionId, createdAt])
   @@index([status])
+  @@index([publicShareToken])
 }
 
 model AiCallUsage {
