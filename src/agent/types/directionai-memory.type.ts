@@ -21,6 +21,7 @@ export type DirectionAiProjectProfile = {
 
 export type DirectionAiMemory = {
   rawIdea?: string;
+  clarificationNeeded?: boolean;
   project: DirectionAiProjectProfile;
   conversation: DirectionAiConversationItem[];
   pendingQuestions: string[];

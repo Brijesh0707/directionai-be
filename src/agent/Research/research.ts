@@ -52,15 +52,100 @@ type StructuredSectionData = {
     altText: string;
     source: string;
   }>;
+  ShortSummary?: string;
 };
 
+// Special structure types
+type SwotData = {
+  Strengths: string[];
+  Weaknesses: string[];
+  Opportunities: string[];
+  Threats: string[];
+  ShortSummary: string;
+};
+
+type MarketSizeData = {
+  marketSize: string;
+  TAM: string;
+  SAM: string;
+  SOM: string;
+  ShortSummary: string;
+};
+
+type CustomerPainPointsData = {
+  painPoints: string[];
+  rootCauses: string[];
+  impact: string;
+  ShortSummary: string;
+};
+
+type StructuredSectionResult = 
+  | StructuredSectionData[] 
+  | StructuredSectionData 
+  | SwotData 
+  | MarketSizeData 
+  | CustomerPainPointsData;
+
+// Update FinalResearchPayload
 export type FinalResearchPayload = {
-  mergedResponse: JSON | string;
+  mergedResponse: string;
+  mergedShortSummary: string;
 };
 
 @Injectable()
 export class ResearchAgentService {
   private readonly logger = new Logger(ResearchAgentService.name);
+  private CommonStructure = `
+[
+  {
+    "answer": "string",
+    "query": "string",
+    "results": [
+      {
+        "title": "string",
+        "content": "string",
+        "url": "string",
+        "snippet": "string",
+        "source": "string"
+      }
+    ],
+    "images": [
+      {
+        "url": "string",
+        "altText": "string",
+        "source": "string"
+      }
+    ],
+    "ShortSummary": "string"
+  }
+]
+  `;
+  private SwotStructure = `
+  {
+    "Strengths": ["string"],
+    "Weaknesses": ["string"],
+    "Opportunities": ["string"],
+    "Threats": ["string"],
+    "ShortSummary": "string"
+  }
+  `;
+  private MarketSize = `
+  {
+    "marketSize": "string",
+    "TAM": "string",
+    "SAM": "string",
+    "SOM": "string",
+    "ShortSummary": "string"
+  }
+  `;
+  private CustomerPainPoints = `
+  {
+    "painPoints": ["string"],
+    "rootCauses": ["string"],
+    "impact": "string",
+    "ShortSummary": "string"
+  }
+  `;
 
   constructor(
     private readonly aiService: AiService,
@@ -90,8 +175,7 @@ export class ResearchAgentService {
 
     onProgress?.('merge', 'Merging and synthesizing findings', 58);
 
-    // ✅ Each section gets its own small AI call → then manually merge into final JSON
-    const mergedResponse = await this.mergeResponsesAgent(
+    const { mergedResponse, mergedShortSummary } = await this.mergeResponsesAgent(
       requestText,
       searchAgentResponses,
     );
@@ -99,11 +183,14 @@ export class ResearchAgentService {
     onProgress?.('done', 'Research pipeline completed', 100);
     this.logger.log('runResearchAgentPipeline completed');
 
-    return { mergedResponse };
+    return { 
+      mergedResponse,
+      mergedShortSummary
+    };
   }
 
   // ---------------------------------------------------------------------------
-  // SUMMARIZE REQUEST AGENT  (unchanged logic)
+  // SUMMARIZE REQUEST AGENT
   // ---------------------------------------------------------------------------
   private async summarizeRequestAgent(
     requestText: string,
@@ -195,13 +282,12 @@ Then:
         'aiStartupKeywords',
         'swotKeywords',
         'fundingKeywords',
-      ];
+      ] as const;
 
       for (const key of requiredKeywords) {
-        if (!parsed.searchKeywords[key as keyof typeof parsed.searchKeywords]) {
+        if (!parsed.searchKeywords[key]) {
           this.logger.warn(`Missing keyword ${key}, using fallback`);
-          parsed.searchKeywords[key as keyof typeof parsed.searchKeywords] =
-            parsed.topic;
+          (parsed.searchKeywords as any)[key] = parsed.topic;
         }
       }
 
@@ -253,7 +339,7 @@ Then:
   }
 
   // ---------------------------------------------------------------------------
-  // SEARCH AGGREGATION AGENT  (unchanged logic)
+  // SEARCH AGGREGATION AGENT
   // ---------------------------------------------------------------------------
   private async searchAggregationAgent(
     summary: ResearchSummary,
@@ -402,13 +488,11 @@ Then:
 
   // ---------------------------------------------------------------------------
   // MERGE RESPONSES AGENT
-  // ✅ KEY CHANGE: Each section gets its own focused AI call (small output),
-  //    then we manually assemble the final JSON — zero AI in the merge step.
   // ---------------------------------------------------------------------------
   private async mergeResponsesAgent(
     requestText: string,
     responses: ResearchSectionResult[],
-  ): Promise<string> {
+  ): Promise<{ mergedResponse: string; mergedShortSummary: string }> {
     this.logger.log('mergeResponsesAgent started — per-section AI structuring');
 
     const successfulResponses = responses.filter((r) => r.success);
@@ -426,40 +510,63 @@ Then:
     );
 
     // Map section name → structured data (or null on failure)
-    const sectionMap = new Map<string, StructuredSectionData[] | StructuredSectionData | null>();
+    const sectionMap = new Map<string, StructuredSectionResult | null>();
+
+    // Store all ShortSummaries for merging
+    const allShortSummaries: Array<{ section: string; summary: string }> = [];
 
     successfulResponses.forEach((r, idx) => {
       const result = structuredSections[idx];
       if (result.status === 'fulfilled') {
-        sectionMap.set(r.section, result.value);
+        const structuredData = result.value;
+        sectionMap.set(r.section, structuredData);
+        
+        // Extract ShortSummary from the structured data
+        let summary = '';
+        if (structuredData && typeof structuredData === 'object') {
+          if ('ShortSummary' in structuredData && structuredData.ShortSummary) {
+            summary = structuredData.ShortSummary;
+          } else if (Array.isArray(structuredData) && structuredData[0]?.ShortSummary) {
+            summary = structuredData[0].ShortSummary;
+          } else if ('answer' in structuredData && structuredData.answer) {
+            // For common structure, use answer as summary
+            summary = structuredData.answer;
+          }
+        }
+        
+        if (summary) {
+          allShortSummaries.push({ section: r.section, summary });
+        }
       } else {
         this.logger.warn(
           `structureSingleSection failed for ${r.section}: ${
-            result.reason instanceof Error
-              ? result.reason.message
-              : 'unknown'
+            result.reason instanceof Error ? result.reason.message : 'unknown'
           }`,
         );
         sectionMap.set(r.section, null);
       }
     });
 
+    // Generate Merged Short Summary
+    const mergedShortSummary = await this.generateMergedShortSummary(
+      requestText,
+      allShortSummaries,
+    );
+
+    const failedSectionNames = failedResponses.map((f) => f.section);
+
     // Helper — returns section data or a typed null-result entry
-    const getSection = (
-      key: string,
-    ): { success: boolean; data: StructuredSectionData[] | StructuredSectionData | null } => {
+    const getSection = (key: string): { success: boolean; data: StructuredSectionResult | null } => {
       if (sectionMap.has(key)) {
         const data = sectionMap.get(key) ?? null;
         return { success: data !== null, data };
       }
-      // Section either failed at search level or was never requested
       return { success: false, data: null };
     };
 
-    const failedSectionNames = failedResponses.map((f) => f.section);
-
-    // ✅ Manually assemble — identical shape to your original output contract
+    // Manually assemble final JSON
     const finalJson = {
+      mergedShortSummary,
       researchMetadata: {
         originalRequest: requestText,
         timestamp: new Date().toISOString(),
@@ -515,22 +622,85 @@ Then:
     };
 
     this.logger.log('mergeResponsesAgent completed — manual JSON assembly done');
-    return JSON.stringify(finalJson, null, 2);
+    return { 
+      mergedResponse: JSON.stringify(finalJson, null, 2),
+      mergedShortSummary 
+    };
+  }
+
+  // New method to generate merged ShortSummary
+  private async generateMergedShortSummary(
+    requestText: string,
+    allSummaries: Array<{ section: string; summary: string }>,
+  ): Promise<string> {
+    if (allSummaries.length === 0) {
+      return "No summaries available to merge.";
+    }
+
+    const summariesText = allSummaries
+      .map((item) => `[${item.section}]: ${item.summary}`)
+      .join('\n\n');
+
+    const prompt = `You are a research synthesis agent. Merge all the individual section summaries below into ONE cohesive, executive summary that answers the original research request.
+
+Original Request: "${requestText}"
+
+Individual Section Summaries:
+${summariesText}
+
+Generate a single, comprehensive merged summary (2-3 paragraphs) that:
+1. Synthesizes key findings from all sections
+2. Answers the original research request
+3. Highlights the most important insights and patterns
+4. Mentions critical gaps or contradictions (if any)
+5. Provides actionable recommendations based on the research
+
+Return ONLY the merged summary text, no JSON or additional formatting.`;
+
+    try {
+      const mergedSummary = await this.askAi(prompt);
+      return mergedSummary.trim();
+    } catch (error) {
+      this.logger.error(`Failed to generate merged summary: ${error}`);
+      // Fallback: manually concatenate summaries
+      return allSummaries.map((item) => `${item.section}: ${item.summary}`).join('\n\n');
+    }
   }
 
   // ---------------------------------------------------------------------------
   // PER-SECTION AI STRUCTURING
-  // Each call only needs to output one small StructuredSectionData object
-  // — well within token budget even for cheap models.
   // ---------------------------------------------------------------------------
   private async structureSingleSection(
     section: string,
     rawData: unknown,
-  ): Promise<StructuredSectionData[] | StructuredSectionData> {
+  ): Promise<StructuredSectionResult> {
     this.logger.log(`structureSingleSection started for: ${section}`);
 
-    // allPlatformReviews returns a single object, others return arrays
-    const isArraySection = section !== 'allPlatformReviews';
+    // Determine which structure to use based on section
+    let structureToUse: string;
+    let isSpecialStructure = false;
+    
+    switch (section) {
+      case 'swotAnalysis':
+        structureToUse = this.SwotStructure;
+        isSpecialStructure = true;
+        break;
+      case 'findTAM':
+      case 'findSAM':
+      case 'findSOM':
+        structureToUse = this.MarketSize;
+        isSpecialStructure = true;
+        break;
+      case 'customerPainPoints':
+        structureToUse = this.CustomerPainPoints;
+        isSpecialStructure = true;
+        break;
+      default:
+        // allPlatformReviews returns single object, others return arrays
+        const isArraySection = section !== 'allPlatformReviews';
+        structureToUse = isArraySection ? this.CommonStructure : this.CommonStructure.replace(/\[|\]/g, '').trim();
+        break;
+    }
 
     const prompt = `You are a data structuring agent. Convert the raw search data below into the required JSON format.
 DO NOT summarize, truncate, or modify any content. Preserve ALL data exactly as-is.
@@ -540,72 +710,37 @@ Section: "${section}"
 Raw Data:
 ${JSON.stringify(rawData, null, 2)}
 
-${
-  isArraySection
-    ? `Return ONLY a JSON array. Each element must follow this shape:
-[
-  {
-    "answer": "string",
-    "query": "string",
-    "results": [
-      {
-        "title": "string",
-        "content": "string",
-        "url": "string",
-        "snippet": "string",
-        "source": "string"
-      }
-    ],
-    "images": [
-      {
-        "url": "string",
-        "altText": "string",
-        "source": "string"
-      }
-    ]
-  }
-]`
-    : `Return ONLY a single JSON object with this shape:
-{
-  "answer": "string",
-  "query": "string",
-  "results": [
-    {
-      "title": "string",
-      "content": "string",
-      "url": "string",
-      "snippet": "string",
-      "source": "string"
-    }
-  ],
-  "images": [
-    {
-      "url": "string",
-      "altText": "string",
-      "source": "string"
-    }
-  ]
-}`
-}
+Required structure:
+${structureToUse}
 
 RULES:
 1. Map existing fields to the required shape as closely as possible
 2. Use empty string "" for missing string fields
 3. Use empty array [] for missing array fields
-4. Preserve all original text content verbatim`;
+4. Preserve all original text content verbatim
+5. IMPORTANT: For all structures, ensure you include the "ShortSummary" field`;
 
     try {
       const text = await this.askAi(prompt);
       const jsonText = this.extractJsonFromResponse(text);
-
-      if (isArraySection) {
-        const parsed = JSON.parse(jsonText) as StructuredSectionData[];
-        this.logger.log(`structureSingleSection completed for: ${section}`);
-        return Array.isArray(parsed) ? parsed : [parsed as unknown as StructuredSectionData];
-      } else {
-        const parsed = JSON.parse(jsonText) as StructuredSectionData;
-        this.logger.log(`structureSingleSection completed for: ${section}`);
+      
+      if (isSpecialStructure) {
+        // Parse special structures (SWOT, MarketSize, CustomerPainPoints)
+        const parsed = JSON.parse(jsonText);
+        this.logger.log(`structureSingleSection completed for: ${section} (special structure)`);
         return parsed;
+      } else {
+        // Handle common structure (array or single object)
+        const isArraySection = section !== 'allPlatformReviews';
+        if (isArraySection) {
+          const parsed = JSON.parse(jsonText) as StructuredSectionData[];
+          this.logger.log(`structureSingleSection completed for: ${section} (array)`);
+          return Array.isArray(parsed) ? parsed : [parsed as StructuredSectionData];
+        } else {
+          const parsed = JSON.parse(jsonText) as StructuredSectionData;
+          this.logger.log(`structureSingleSection completed for: ${section} (single object)`);
+          return parsed;
+        }
       }
     } catch (error) {
       this.logger.warn(
@@ -614,28 +749,55 @@ RULES:
         }`,
       );
 
-      // Fallback: wrap raw data in required shape so pipeline never fully breaks
-      const fallbackItem: StructuredSectionData = {
-        answer: '',
-        query: section,
-        results: [
-          {
+      // Fallback based on section type
+      if (section === 'swotAnalysis') {
+        const fallbackData: SwotData = {
+          Strengths: [],
+          Weaknesses: [],
+          Opportunities: [],
+          Threats: [],
+          ShortSummary: `Failed to process SWOT analysis for ${section}`
+        };
+        return fallbackData;
+      } else if (section === 'findTAM' || section === 'findSAM' || section === 'findSOM') {
+        const fallbackData: MarketSizeData = {
+          marketSize: "Data unavailable",
+          TAM: "Data unavailable",
+          SAM: "Data unavailable",
+          SOM: "Data unavailable",
+          ShortSummary: `Failed to process market size data for ${section}`
+        };
+        return fallbackData;
+      } else if (section === 'customerPainPoints') {
+        const fallbackData: CustomerPainPointsData = {
+          painPoints: [],
+          rootCauses: [],
+          impact: "Data unavailable",
+          ShortSummary: `Failed to process customer pain points for ${section}`
+        };
+        return fallbackData;
+      } else {
+        const fallbackItem: StructuredSectionData = {
+          answer: '',
+          query: section,
+          results: [{
             title: section,
             content: JSON.stringify(rawData),
             url: '',
             snippet: '',
             source: section,
-          },
-        ],
-        images: [],
-      };
-
-      return isArraySection ? [fallbackItem] : fallbackItem;
+          }],
+          images: [],
+          ShortSummary: `Failed to process ${section} data`
+        };
+        const isArraySection = section !== 'allPlatformReviews';
+        return isArraySection ? [fallbackItem] : fallbackItem;
+      }
     }
   }
 
   // ---------------------------------------------------------------------------
-  // SHARED UTILITIES  (unchanged)
+  // SHARED UTILITIES
   // ---------------------------------------------------------------------------
   private extractJsonFromResponse(text: string): string {
     let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
@@ -647,7 +809,10 @@ RULES:
     let start: number;
     let end: number;
 
-    if (firstBracket !== -1 && (firstBracket < firstBrace || firstBrace === -1)) {
+    if (
+      firstBracket !== -1 &&
+      (firstBracket < firstBrace || firstBrace === -1)
+    ) {
       start = firstBracket;
       end = cleaned.lastIndexOf(']');
     } else {
@@ -707,7 +872,7 @@ RULES:
   }
 
   // ---------------------------------------------------------------------------
-  // FORMATTING UTILITY  (kept for any future use)
+  // FORMATTING UTILITY
   // ---------------------------------------------------------------------------
   private formatSectionTitle(section: string): string {
     const titles: Record<string, string> = {

@@ -768,8 +768,10 @@ export class ChatService {
     response: DirectionAiResponse,
   ): DirectionAiMemory {
     const now = new Date().toISOString();
+    const clarificationNeeded = Boolean(response.clarificationNeeded);
     return {
       rawIdea,
+      clarificationNeeded,
       project: {
         name: this.normalizeProjectName(response.projectName),
         category: response.projectCategory,
@@ -787,12 +789,14 @@ export class ChatService {
         this.createConversationItem('user', 'intake', rawIdea, now),
         this.createConversationItem(
           'assistant',
-          response.clarificationNeeded ? 'clarification' : 'recommendation',
+          clarificationNeeded ? 'clarification' : 'recommendation',
           response.assistantMessage,
           now,
         ),
       ],
-      pendingQuestions: response.clarificationQuestions ?? [],
+      pendingQuestions: clarificationNeeded
+        ? (response.clarificationQuestions ?? [])
+        : [],
       agentSummaries: {},
       lastUpdatedAt: now,
     };
@@ -815,6 +819,7 @@ export class ChatService {
         conversation: [],
         pendingQuestions: [],
         agentSummaries: {},
+        clarificationNeeded: false,
         lastUpdatedAt: new Date().toISOString(),
       };
     }
@@ -859,6 +864,7 @@ export class ChatService {
         if (summary) acc[key] = summary;
         return acc;
       }, {}),
+      clarificationNeeded: Boolean(raw.clarificationNeeded),
       lastUpdatedAt:
         this.asString(raw.lastUpdatedAt) || new Date().toISOString(),
     };
@@ -870,6 +876,7 @@ export class ChatService {
     response: DirectionAiResponse,
   ): DirectionAiMemory {
     const now = new Date().toISOString();
+    const clarificationNeeded = Boolean(response.clarificationNeeded);
     const conversation = [
       ...current.conversation,
       this.createConversationItem('user', 'reply', userMessage, now),
@@ -883,6 +890,7 @@ export class ChatService {
 
     return {
       rawIdea: current.rawIdea,
+      clarificationNeeded,
       project: {
         name: this.normalizeProjectName(
           response.projectName || current.project.name,
@@ -902,7 +910,9 @@ export class ChatService {
         confidence: response.confidence ?? current.project.confidence,
       },
       conversation,
-      pendingQuestions: response.clarificationQuestions ?? [],
+      pendingQuestions: clarificationNeeded
+        ? (response.clarificationQuestions ?? [])
+        : [],
       agentSummaries: current.agentSummaries,
       lastUpdatedAt: now,
     };
@@ -1041,16 +1051,10 @@ export class ChatService {
 
     if (agentType === 'RESEARCH') {
       const merged = this.parseResearchMergedResponse(root?.mergedResponse);
-      const summary = this.asRecord(root?.summarizedRequest);
-      const topic = this.asString(summary?.topic);
-      const audience = this.asString(summary?.audience);
-      const intent = this.asString(summary?.intent);
-      const competitors = this.asStringArray(summary?.competitors).slice(0, 4);
-      if (topic) lines.push(`- Topic: ${topic}`);
-      if (audience) lines.push(`- Audience: ${audience}`);
-      if (intent) lines.push(`- Objective: ${intent}`);
-      if (competitors.length)
-        lines.push(`- Competitor set: ${competitors.join(', ')}`);
+      const mergedShortSummary = this.asString(root?.mergedShortSummary);
+      if (mergedShortSummary) {
+        lines.push(`- Executive summary: ${this.compactText(mergedShortSummary, 260)}`);
+      }
       const keyFindings = this.extractResearchKeyFindings(merged).slice(0, 4);
       if (keyFindings.length) {
         lines.push(`- Key findings: ${keyFindings.join(' | ')}`);

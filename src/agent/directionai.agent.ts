@@ -88,6 +88,7 @@ I need a bit more detail before I lock the strategy, but I can already outline t
     const memoryText = memory
       ? JSON.stringify(memory, null, 2)
       : 'No prior memory exists for this project.';
+    const executionSummaryText = this.formatExecutionSummaries(memory);
 
     return `You are DirectionAI, the main business validator, project interpreter, and startup strategist.
 Your job is to speak directly to the user, refine their raw idea into a proper project plan, decide the best first agent from the execution agents, and ask concise clarifying questions when needed.
@@ -103,15 +104,21 @@ Rules:
 2. Keep project naming professional and business-ready.
 3. If the idea is ambiguous, ask up to 3 short clarifying questions.
 4. Still recommend the best first agent even when clarification is needed.
-5. The assistantMessage must be written in clean Markdown so the frontend can render it professionally.
-6. Use short paragraphs, optional headings, and bullet lists when helpful.
-7. Do not wrap the assistantMessage in code fences.
-8. The projectDescription should be a refined product/project description, not the raw user input.
-9. The projectCategory should be normalized to one of: software, saas, d2c, marketplace, service, ai, mobile_app, fintech, healthtech, edtech, content, hardware, other.
-10. Keep the memorySummary compact and useful for later agent runs.
+5. Only include clarificationQuestions when clarificationNeeded is true.
+6. If clarificationNeeded is false, clarificationQuestions must be an empty array.
+7. The assistantMessage must be written in clean Markdown so the frontend can render it professionally.
+8. Use short paragraphs, optional headings, and bullet lists when helpful.
+9. Do not wrap the assistantMessage in code fences.
+10. The projectDescription should be a refined product/project description, not the raw user input.
+11. The projectCategory should be normalized to one of: software, saas, d2c, marketplace, service, ai, mobile_app, fintech, healthtech, edtech, content, hardware, other.
+12. Treat the execution summaries below as primary source material for your synthesis.
+13. Keep the memorySummary compact and useful for later agent runs.
 
 Current memory:
 ${memoryText}
+
+Execution agent summaries:
+${executionSummaryText}
 
 Latest user input:
 ${input}
@@ -135,9 +142,26 @@ Return this exact JSON shape:
 }`;
   }
 
+  private formatExecutionSummaries(memory?: DirectionAiMemory | null): string {
+    const summaries = memory?.agentSummaries ?? {};
+    const preferredOrder = ['RESEARCH', 'MARKETING', 'DEVELOPMENT', 'PPT'];
+    const entries = preferredOrder
+      .map((key) => [key, summaries[key]] as const)
+      .filter(([, summary]) => Boolean(summary));
+
+    if (!entries.length) {
+      return 'No execution summaries available yet.';
+    }
+
+    return entries
+      .map(([agentType, summary]) => `### ${agentType}\n${summary}`)
+      .join('\n\n');
+  }
+
   private parseResponse(raw: string): DirectionAiResponse {
     const cleaned = this.cleanJson(raw);
     const parsed = JSON.parse(cleaned) as DirectionAiResponse;
+    const clarificationNeeded = Boolean(parsed.clarificationNeeded);
 
     const fallback: DirectionAiResponse = {
       projectName: 'Untitled Project',
@@ -175,9 +199,12 @@ I have a workable direction, but I need a little more detail before I lock the s
     return {
       ...fallback,
       ...parsed,
-      clarificationQuestions: Array.isArray(parsed.clarificationQuestions)
-        ? parsed.clarificationQuestions.filter(Boolean)
-        : fallback.clarificationQuestions,
+      clarificationNeeded,
+      clarificationQuestions: clarificationNeeded
+        ? Array.isArray(parsed.clarificationQuestions)
+          ? parsed.clarificationQuestions.filter(Boolean)
+          : fallback.clarificationQuestions
+        : [],
       suggestedNextSteps: Array.isArray(parsed.suggestedNextSteps)
         ? parsed.suggestedNextSteps.filter(Boolean)
         : fallback.suggestedNextSteps,
