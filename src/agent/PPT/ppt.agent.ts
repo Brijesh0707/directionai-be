@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../../ai/ai.service';
 import type { AgentUsageContext } from '../types/agent-usage-context.type';
+import { ImageKitService } from './imagekit.service';
+
+export { ImageKitService, type ImageKitGenerateOptions, type ImageKitGeneratedImage } from './imagekit.service';
 
 export type SlideBlueprint = {
   id: number;
@@ -69,7 +72,7 @@ export type IllustrationAsset = {
   visualKey: string;
   imageUrl: string;
   alt: string;
-  provider: 'unsplash-source';
+  provider: 'unsplash-source' | 'imagekit';
 };
 
 export type ThemeSpec = {
@@ -142,14 +145,21 @@ export class PptAgentService {
     'cta',
   ];
 
-  constructor(private readonly aiService: AiService) {}
+  constructor(
+    private readonly aiService: AiService,
+    private readonly imageKitService: ImageKitService,
+  ) {}
 
   async runPptAgentPipeline(
     requestText: string,
     inputPlan?: SlidePlan,
     onProgress?: (stage: string, message: string, progress: number) => void,
     usageContext?: AgentUsageContext,
+    imageProvider: 'unsplash-source' | 'imagekit' = 'imagekit',
   ): Promise<FinalPptPayload> {
+    this.logger.log(`[PPT Pipeline] Starting with image provider: ${imageProvider}`);
+    this.logger.log(`[PPT Pipeline] ImageKit configured: ${this.imageKitService.isConfigured()}`);
+    
     onProgress?.('categorize', 'Understanding request and presentation intent', 10);
     const categorized = await this.categorizeAndUnderstandAgent(requestText, usageContext);
 
@@ -163,7 +173,17 @@ export class PptAgentService {
     const structuredVisualData = await this.visualDataExtractionAgent(mapped, categorized, usageContext);
 
     onProgress?.('illustrations', 'Preparing slide illustrations', 70);
-    const illustrations = await this.illustrationEngineAgent(mapped, usageContext);
+    
+    const useImageKit = imageProvider === 'imagekit' && this.imageKitService.isConfigured();
+    this.logger.log(`[PPT Pipeline] Image provider selection: requested=${imageProvider}, configured=${this.imageKitService.isConfigured()}, using=${useImageKit ? 'imagekit' : 'unsplash'}`);
+    
+    if (imageProvider === 'imagekit' && !this.imageKitService.isConfigured()) {
+      this.logger.warn(`[PPT Pipeline] ImageKit requested but not configured - falling back to Unsplash`);
+    }
+    
+    const illustrations = useImageKit
+      ? await this.illustrationEngineAgentWithImageKit(mapped, usageContext)
+      : await this.illustrationEngineAgent(mapped, usageContext);
 
     onProgress?.('theme', 'Generating presentation theme', 82);
     const theme = await this.themeEngineAgent(categorized, mapped, usageContext);
@@ -390,6 +410,8 @@ Context JSON:\n${JSON.stringify(categorized)}`;
     mappedSlides: SlideContentMap[],
     usageContext?: AgentUsageContext,
   ): Promise<IllustrationAsset[]> {
+    this.logger.log(`[Unsplash] Generating illustrations for ${mappedSlides.length} slides using Unsplash source`);
+    
     const prompt = `You are agent-4 illustration engine.
 Task: for each visual key, return a short query phrase for free stock image search.
 Return ONLY valid JSON array in this shape:
@@ -407,24 +429,116 @@ Slides:\n${JSON.stringify(
         throw new Error('Invalid illustration JSON');
       }
 
-      return queries.map((item) => ({
-        slideId: item.slideId,
-        visualKey: item.visualKey,
-        imageUrl: `https://source.unsplash.com/1280x720/?${encodeURIComponent(item.query)}`,
-        alt: item.alt || `${item.visualKey} illustration`,
-        provider: 'unsplash-source',
-      }));
+      this.logger.log(`[Unsplash] AI generated ${queries.length} image queries`);
+
+      const results = queries.map((item) => {
+        const imageUrl = `https://source.unsplash.com/1280x720/?${encodeURIComponent(item.query)}`;
+        this.logger.log(`[Unsplash] Slide ${item.slideId}: "${item.visualKey}" -> ${imageUrl.substring(0, 80)}...`);
+        return {
+          slideId: item.slideId,
+          visualKey: item.visualKey,
+          imageUrl,
+          alt: item.alt || `${item.visualKey} illustration`,
+          provider: 'unsplash-source' as const,
+        };
+      });
+
+      this.logger.log(`[Unsplash] Generated ${results.length} Unsplash URLs`);
+      return results;
     } catch (error) {
-      this.logger.warn(
-        `illustrationEngineAgent fallback: ${error instanceof Error ? error.message : 'unknown'}`,
+      this.logger.error(`[Unsplash] Error generating illustrations: ${error instanceof Error ? error.message : 'unknown'}`);
+      this.logger.warn(`[Unsplash] Falling back to default image URLs`);
+      
+      return mappedSlides.map((slide) => {
+        const imageUrl = `https://source.unsplash.com/1280x720/?${encodeURIComponent(`${slide.content.visual} business presentation`)}`;
+        this.logger.log(`[Unsplash] Slide ${slide.slideId} (fallback): "${slide.content.visual}" -> ${imageUrl.substring(0, 80)}...`);
+        return {
+          slideId: slide.slideId,
+          visualKey: slide.content.visual,
+          imageUrl,
+          alt: `${slide.content.visual} illustration`,
+          provider: 'unsplash-source' as const,
+        };
+      });
+    }
+  }
+
+  /**
+   * Generate illustrations using ImageKit AI image generation
+   * This is an alternative to illustrationEngineAgent which uses Unsplash
+   */
+  async illustrationEngineAgentWithImageKit(
+    mappedSlides: SlideContentMap[],
+    usageContext?: AgentUsageContext,
+  ): Promise<IllustrationAsset[]> {
+    this.logger.log(`[ImageKit] Starting image generation for ${mappedSlides.length} slides`);
+    this.logger.log(`[ImageKit] Service configured: ${this.imageKitService.isConfigured()}`);
+
+    const prompt = `You are agent-4 illustration engine.
+Task: for each visual key, return a detailed image generation prompt for AI image creation.
+Return ONLY valid JSON array in this shape:
+[
+  { "slideId": 1, "visualKey": "string", "prompt": "string - detailed image generation prompt", "alt": "string" }
+]
+Slides:\n${JSON.stringify(
+      mappedSlides.map((s) => ({ slideId: s.slideId, visual: s.content.visual, heading: s.content.heading })),
+    )}`;
+
+    try {
+      const text = await this.askAi(prompt, { ...usageContext, callLabel: 'ppt.illustrations.imagekit' });
+      const queries = this.parseJson<Array<{ slideId: number; visualKey: string; prompt: string; alt: string }>>(text);
+      if (!Array.isArray(queries) || queries.length === 0) {
+        throw new Error('Invalid illustration JSON');
+      }
+
+      this.logger.log(`[ImageKit] AI generated ${queries.length} image prompts`);
+
+      // Generate images with ImageKit in parallel
+      const results = await Promise.all(
+        queries.map(async (item) => {
+          this.logger.log(`[ImageKit] Slide ${item.slideId}: Generating image for "${item.visualKey}"`);
+          this.logger.log(`[ImageKit] Prompt: "${item.prompt.substring(0, 80)}..."`);
+          
+          const imageUrl = await this.imageKitService.buildImageUrlFromPrompt(item.prompt);
+          
+          if (imageUrl) {
+            this.logger.log(`[ImageKit] Slide ${item.slideId}: SUCCESS - Image generated`);
+            this.logger.log(`[ImageKit] URL: ${imageUrl.substring(0, 80)}...`);
+          } else {
+            this.logger.error(`[ImageKit] Slide ${item.slideId}: FAILED - Image generation returned null, falling back to Unsplash`);
+          }
+          
+          return {
+            slideId: item.slideId,
+            visualKey: item.visualKey,
+            imageUrl: imageUrl ?? `https://source.unsplash.com/1280x720/?${encodeURIComponent(item.prompt.slice(0, 50))}`,
+            alt: item.alt || `${item.visualKey} illustration`,
+            provider: imageUrl ? ('imagekit' as const) : ('unsplash-source' as const),
+          };
+        }),
       );
-      return mappedSlides.map((slide) => ({
-        slideId: slide.slideId,
-        visualKey: slide.content.visual,
-        imageUrl: `https://source.unsplash.com/1280x720/?${encodeURIComponent(`${slide.content.visual} business presentation`)}`,
-        alt: `${slide.content.visual} illustration`,
-        provider: 'unsplash-source',
-      }));
+
+      const imagekitCount = results.filter(r => r.provider === 'imagekit').length;
+      const unsplashCount = results.filter(r => r.provider === 'unsplash-source').length;
+      this.logger.log(`[ImageKit] Completed: ${imagekitCount} ImageKit images, ${unsplashCount} Unsplash fallbacks`);
+
+      return results;
+    } catch (error) {
+      this.logger.error(`[ImageKit] Error in illustration engine: ${error instanceof Error ? error.message : 'unknown'}`);
+      this.logger.error(`[ImageKit] Falling back to Unsplash for all ${mappedSlides.length} slides`);
+      
+      // Fallback to generating with Unsplash
+      return mappedSlides.map((slide) => {
+        const imageUrl = `https://source.unsplash.com/1280x720/?${encodeURIComponent(`${slide.content.visual} business presentation`)}`;
+        this.logger.log(`[Unsplash] Slide ${slide.slideId} (fallback): "${slide.content.visual}" -> ${imageUrl.substring(0, 80)}...`);
+        return {
+          slideId: slide.slideId,
+          visualKey: slide.content.visual,
+          imageUrl,
+          alt: `${slide.content.visual} illustration`,
+          provider: 'unsplash-source' as const,
+        };
+      });
     }
   }
 
@@ -499,19 +613,20 @@ Return ONLY valid JSON in this exact shape:
 Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type) })}`;
 
     try {
-      const text = await this.askAi(prompt, { ...usageContext, callLabel: 'ppt.theme' });
-      const theme = this.parseJson<ThemeSpec>(text);
-      if (!theme || !theme.backgroundColor || !theme.primaryColor || !theme.textColor) {
-        throw new Error('Invalid theme JSON');
-      }
-      return theme;
+        return {
+        backgroundColor: '#F9FAFB',
+        primaryColor: '#0B04CF',
+        secondaryColor: '#1208E8',
+        textColor: '#0B04CF',
+        accentColor: '#2563EB',
+      };
     } catch (error) {
       this.logger.warn(`themeEngineAgent fallback: ${error instanceof Error ? error.message : 'unknown'}`);
       return {
         backgroundColor: '#F9FAFB',
-        primaryColor: '#1F2937',
-        secondaryColor: '#4B5563',
-        textColor: '#111827',
+        primaryColor: '#0B04CF',
+        secondaryColor: '#1208E8',
+        textColor: '#0B04CF',
         accentColor: '#2563EB',
       };
     }
