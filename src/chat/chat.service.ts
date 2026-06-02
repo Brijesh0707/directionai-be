@@ -320,6 +320,7 @@ export class ChatService {
       });
 
       try {
+        const memory = this.readDirectionMemory(session.memoryJson);
         const result = await this.agentService.runAgent(
           agentType,
           session.idea,
@@ -342,6 +343,7 @@ export class ChatService {
             chatSessionId: chatId,
             agentRunId: run.id,
             agentType,
+            directionMemory: memory,
           },
         );
         const memorySummary = this.buildAgentSummary(agentType, result);

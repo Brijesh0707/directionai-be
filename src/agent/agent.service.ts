@@ -58,28 +58,30 @@ export class AgentService {
       });
     };
 
+    const memoryContext = usageContext?.directionMemory;
+
     switch (normalizedAgentType) {
       case 'PPT':
         this.logger.log('Routing request to PptAgentService');
         return this.pptAgentService.runPptAgentPipeline(normalizedText, undefined, emit, {
           ...usageContext,
           agentType: normalizedAgentType,
-        });
+        }, 'imagekit', memoryContext);
       case 'RESEARCH':
         this.logger.log('Routing request to ResearchAgentService');
-        return this.researchAgentService.runResearchAgentPipeline(normalizedText, emit);
+        return this.researchAgentService.runResearchAgentPipeline(normalizedText, emit, memoryContext);
       case 'MARKETING':
         this.logger.log('Routing request to MarketingAgent');
         return this.marketingAgent.runMarketingAgentPipeline(normalizedText, emit, {
           ...usageContext,
           agentType: normalizedAgentType,
-        });
+        }, memoryContext);
       case 'DEVELOPMENT':
         this.logger.log('Routing request to DevelopmentAgent');
         return this.developmentAgent.runDevelopmentAgentPipeline(normalizedText, emit, {
           ...usageContext,
           agentType: normalizedAgentType,
-        });
+        }, memoryContext);
       default:
         throw new BadRequestException(
           `Unsupported agent type: ${agentType}. Supported types: PPT, RESEARCH, MARKETING, DEVELOPMENT`,

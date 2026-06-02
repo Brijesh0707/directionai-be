@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../../ai/ai.service';
 import type { AgentUsageContext } from '../types/agent-usage-context.type';
+import type { DirectionAiMemory } from '../types/directionai-memory.type';
 import { ImageKitService } from './imagekit.service';
 
 export { ImageKitService, type ImageKitGenerateOptions, type ImageKitGeneratedImage } from './imagekit.service';
@@ -156,12 +157,14 @@ export class PptAgentService {
     onProgress?: (stage: string, message: string, progress: number) => void,
     usageContext?: AgentUsageContext,
     imageProvider: 'unsplash-source' | 'imagekit' = 'imagekit',
+    memory?: DirectionAiMemory | null,
   ): Promise<FinalPptPayload> {
     this.logger.log(`[PPT Pipeline] Starting with image provider: ${imageProvider}`);
     this.logger.log(`[PPT Pipeline] ImageKit configured: ${this.imageKitService.isConfigured()}`);
     
+    const contextText = this.buildContextText(requestText, memory);
     onProgress?.('categorize', 'Understanding request and presentation intent', 10);
-    const categorized = await this.categorizeAndUnderstandAgent(requestText, usageContext);
+    const categorized = await this.categorizeAndUnderstandAgent(contextText, usageContext);
 
     onProgress?.('planning', 'Planning slide architecture', 24);
     const slidePlan = await this.slidePlanningAgent(categorized, inputPlan, usageContext);
@@ -704,5 +707,47 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
       .map((item) => item.trim())
       .filter((item) => item.length > 0)
       .slice(0, 6);
+  }
+
+  private buildContextText(rawIdea: string, memory?: DirectionAiMemory | null): string {
+    if (!memory) return rawIdea;
+
+    const lines: string[] = [];
+    
+    if (memory.project) {
+      lines.push(`PROJECT PROFILE:`);
+      if (memory.project.name) lines.push(`- Name: ${memory.project.name}`);
+      if (memory.project.category) lines.push(`- Category: ${memory.project.category}`);
+      if (memory.project.description) lines.push(`- Description: ${memory.project.description}`);
+      if (memory.project.businessType) lines.push(`- Business Type: ${memory.project.businessType}`);
+      if (memory.project.audience) lines.push(`- Target Audience: ${memory.project.audience}`);
+      if (memory.project.objective) lines.push(`- Objective: ${memory.project.objective}`);
+    }
+
+    const qaPairs = memory.conversation?.filter(
+      (c) => c.kind === 'clarification' || c.kind === 'reply'
+    );
+    if (qaPairs.length > 0) {
+      lines.push(`\nUSER Q&A CONTEXT:`);
+      for (const item of qaPairs) {
+        lines.push(`- [${item.role}]: ${item.content.substring(0, 200)}`);
+      }
+    }
+
+    if (memory.pendingQuestions?.length > 0) {
+      lines.push(`\nPENDING QUESTIONS: ${memory.pendingQuestions.join(', ')}`);
+    }
+
+    const otherSummaries = Object.entries(memory.agentSummaries || {})
+      .filter(([key]) => key !== 'PPT')
+      .map(([key, summary]) => `${key}: ${summary.substring(0, 200)}`);
+    if (otherSummaries.length > 0) {
+      lines.push(`\nOTHER AGENT RESULTS:`);
+      lines.push(...otherSummaries);
+    }
+
+    lines.push(`\nORIGINAL IDEA: ${rawIdea}`);
+
+    return lines.join('\n');
   }
 }

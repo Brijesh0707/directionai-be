@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import MarketingData from '../../../knowleage/Marketing.json';
 import { AiService } from 'src/ai/ai.service';
 import type { AgentUsageContext } from '../types/agent-usage-context.type';
+import type { DirectionAiMemory } from '../types/directionai-memory.type';
 
 export type FinalMarketingPayload = {
   response_structure: Record<string, unknown>;
@@ -407,15 +408,18 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     input: string,
     onProgress?: (stage: string, message: string, progress: number) => void,
     usageContext?: AgentUsageContext,
+    memory?: DirectionAiMemory | null,
   ): Promise<FinalMarketingPayload> {
     this.logger.log('Running MarketingAgent pipeline with enhanced split strategy');
     onProgress?.('setup', 'Preparing marketing analysis sections', 8);
+
+    const contextInput = this.buildContextText(input, memory);
 
     // SECTION 1: Core Business Understanding (smaller, less likely to fail)
     const section1Prompt = `
     You are a marketing expert analyzing a business idea and provide strategy to acquire users.
 
-    Analyze this idea: ${input}
+    Analyze this context: ${contextInput}
     
     Return ONLY valid JSON with this exact structure (no other text):
     {
@@ -451,7 +455,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     // SECTION 2: Brain Triggers and Platform Strategy (smaller)
     const section2Prompt = `
     You are a marketing expert analyzing a business idea and provide strategy to acquire users.
-    Based on the same business idea: ${input}
+    Based on the same context: ${contextInput}
     
     Return ONLY valid JSON with this exact structure:
     {
@@ -477,7 +481,7 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     // SECTION 7: Execution Priority and Final Summary (smallest)
     const section7Prompt = `
     You are a marketing expert analyzing a business idea and provide strategy to acquire users.
-    Based on the same business idea: ${input}
+    Based on the same context: ${contextInput}
     
     Return ONLY valid JSON with this exact structure:
     {
@@ -511,10 +515,10 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     ] = await Promise.all([
       this.executePromptWithValidation(section1Prompt, 'Section 1 (Core Business)', 4000, 0, { ...usageContext, callLabel: 'marketing.coreBusiness' }),
       this.executePromptWithValidation(section2Prompt, 'Section 2 (Brain & Platform)', 3000, 0, { ...usageContext, callLabel: 'marketing.brainPlatform' }),
-      this.executeSection3WithSplit(input, usageContext),
-      this.executeSection4WithSplit(input, usageContext),
-      this.executeSection5WithSplit(input, usageContext),
-      this.executeSection6WithSplit(input, usageContext),
+      this.executeSection3WithSplit(contextInput, usageContext),
+      this.executeSection4WithSplit(contextInput, usageContext),
+      this.executeSection5WithSplit(contextInput, usageContext),
+      this.executeSection6WithSplit(contextInput, usageContext),
       this.executePromptWithValidation(section7Prompt, 'Section 7 (Execution & Summary)', 2500, 0, { ...usageContext, callLabel: 'marketing.executionSummary' })
     ]);
     onProgress?.('merge', 'Merging section outputs into final strategy', 88);
@@ -535,5 +539,47 @@ Make sure your response is a complete, valid JSON object that can be parsed with
     this.logger.log('Successfully merged all sections into complete response');
     onProgress?.('done', 'Marketing strategy pipeline completed', 100);
     return completeResponse;
+  }
+
+  private buildContextText(rawIdea: string, memory?: DirectionAiMemory | null): string {
+    if (!memory) return rawIdea;
+
+    const lines: string[] = [];
+    
+    if (memory.project) {
+      lines.push(`PROJECT PROFILE:`);
+      if (memory.project.name) lines.push(`- Name: ${memory.project.name}`);
+      if (memory.project.category) lines.push(`- Category: ${memory.project.category}`);
+      if (memory.project.description) lines.push(`- Description: ${memory.project.description}`);
+      if (memory.project.businessType) lines.push(`- Business Type: ${memory.project.businessType}`);
+      if (memory.project.audience) lines.push(`- Target Audience: ${memory.project.audience}`);
+      if (memory.project.objective) lines.push(`- Objective: ${memory.project.objective}`);
+    }
+
+    const qaPairs = memory.conversation?.filter(
+      (c) => c.kind === 'clarification' || c.kind === 'reply'
+    );
+    if (qaPairs.length > 0) {
+      lines.push(`\nUSER Q&A CONTEXT:`);
+      for (const item of qaPairs) {
+        lines.push(`- [${item.role}]: ${item.content.substring(0, 200)}`);
+      }
+    }
+
+    if (memory.pendingQuestions?.length > 0) {
+      lines.push(`\nPENDING QUESTIONS: ${memory.pendingQuestions.join(', ')}`);
+    }
+
+    const otherSummaries = Object.entries(memory.agentSummaries || {})
+      .filter(([key]) => key !== 'MARKETING')
+      .map(([key, summary]) => `${key}: ${summary.substring(0, 200)}`);
+    if (otherSummaries.length > 0) {
+      lines.push(`\nOTHER AGENT RESULTS:`);
+      lines.push(...otherSummaries);
+    }
+
+    lines.push(`\nORIGINAL IDEA: ${rawIdea}`);
+
+    return lines.join('\n');
   }
 }

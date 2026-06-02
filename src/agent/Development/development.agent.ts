@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from 'src/ai/ai.service';
 import type { AgentUsageContext } from '../types/agent-usage-context.type';
+import type { DirectionAiMemory } from '../types/directionai-memory.type';
 
 type ProjectUnderstanding = {
   project_summary: string;
@@ -115,12 +116,15 @@ export class DevelopmentAgent {
     input: string,
     onProgress?: (stage: string, message: string, progress: number) => void,
     usageContext?: AgentUsageContext,
+    memory?: DirectionAiMemory | null,
   ): Promise<FinalDevelopmentPayload> {
     this.logger.log('Running DevelopmentAgent pipeline');
     onProgress?.('understanding', 'Analyzing project understanding', 10);
 
+    const contextInput = this.buildContextText(input, memory);
+
     const understanding = await this.executePromptWithValidation<ProjectUnderstanding>(
-      this.buildUnderstandingPrompt(input),
+      this.buildUnderstandingPrompt(contextInput),
       'project_understanding',
       ['project_summary', 'problem_statement', 'proposed_solution', 'project_category'],
       TOKEN_BUDGETS.understanding,
@@ -129,11 +133,11 @@ export class DevelopmentAgent {
     onProgress?.('planning', 'Creating delivery and phase plan', 25);
 
     // Split delivery planning into chunks
-    const planning = await this.buildDeliveryPlanningInChunks(input, understanding, usageContext);
+    const planning = await this.buildDeliveryPlanningInChunks(contextInput, understanding, usageContext);
     onProgress?.('uiux', 'Generating UI/UX direction', 45);
 
     const uiUx = await this.executePromptWithValidation<UiUxSuggestion>(
-      this.buildUiUxPrompt(input, understanding),
+      this.buildUiUxPrompt(contextInput, understanding),
       'ui_ux_suggestion',
       ['design_direction', 'color_palette', 'ui_patterns', 'style_references'],
       TOKEN_BUDGETS.uiUx,
@@ -141,11 +145,11 @@ export class DevelopmentAgent {
     );
     onProgress?.('scope-map', 'Mapping development scope by phase', 65);
 
-    const scopeMap = await this.buildScopeMapInChunks(input, planning, usageContext);
+    const scopeMap = await this.buildScopeMapInChunks(contextInput, planning, usageContext);
     onProgress?.('tech-stack', 'Selecting technology stack and tradeoffs', 85);
 
     const techStack = await this.executePromptWithValidation<TechStackSuggestion>(
-      this.buildTechStackPrompt(input, understanding),
+      this.buildTechStackPrompt(contextInput, understanding),
       'tech_stack_suggestion',
       ['recommended_stack', 'selection_reasoning', 'tradeoffs', 'bias_check_note'],
       TOKEN_BUDGETS.techStack,
@@ -651,5 +655,47 @@ Project understanding: ${JSON.stringify(understanding)}`;
         'Publish release notes and operational handover.',
       ],
     };
+  }
+
+  private buildContextText(rawIdea: string, memory?: DirectionAiMemory | null): string {
+    if (!memory) return rawIdea;
+
+    const lines: string[] = [];
+    
+    if (memory.project) {
+      lines.push(`PROJECT PROFILE:`);
+      if (memory.project.name) lines.push(`- Name: ${memory.project.name}`);
+      if (memory.project.category) lines.push(`- Category: ${memory.project.category}`);
+      if (memory.project.description) lines.push(`- Description: ${memory.project.description}`);
+      if (memory.project.businessType) lines.push(`- Business Type: ${memory.project.businessType}`);
+      if (memory.project.audience) lines.push(`- Target Audience: ${memory.project.audience}`);
+      if (memory.project.objective) lines.push(`- Objective: ${memory.project.objective}`);
+    }
+
+    const qaPairs = memory.conversation?.filter(
+      (c) => c.kind === 'clarification' || c.kind === 'reply'
+    );
+    if (qaPairs.length > 0) {
+      lines.push(`\nUSER Q&A CONTEXT:`);
+      for (const item of qaPairs) {
+        lines.push(`- [${item.role}]: ${item.content.substring(0, 200)}`);
+      }
+    }
+
+    if (memory.pendingQuestions?.length > 0) {
+      lines.push(`\nPENDING QUESTIONS: ${memory.pendingQuestions.join(', ')}`);
+    }
+
+    const otherSummaries = Object.entries(memory.agentSummaries || {})
+      .filter(([key]) => key !== 'DEVELOPMENT')
+      .map(([key, summary]) => `${key}: ${summary.substring(0, 200)}`);
+    if (otherSummaries.length > 0) {
+      lines.push(`\nOTHER AGENT RESULTS:`);
+      lines.push(...otherSummaries);
+    }
+
+    lines.push(`\nORIGINAL IDEA: ${rawIdea}`);
+
+    return lines.join('\n');
   }
 }

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../../ai/ai.service';
 import { MarketResearchService } from './SearchAgent/market.research';
+import type { DirectionAiMemory } from '../types/directionai-memory.type';
 
 type ResearchSummary = {
   topic: string;
@@ -155,6 +156,7 @@ export class ResearchAgentService {
   async runResearchAgentPipeline(
     requestText: string,
     onProgress?: (stage: string, message: string, progress: number) => void,
+    memory?: DirectionAiMemory | null,
   ): Promise<FinalResearchPayload> {
     this.logger.log('runResearchAgentPipeline started');
     onProgress?.(
@@ -163,7 +165,8 @@ export class ResearchAgentService {
       10,
     );
 
-    const summarizedRequest = await this.summarizeRequestAgent(requestText);
+    const contextText = this.buildContextText(requestText, memory);
+    const summarizedRequest = await this.summarizeRequestAgent(contextText);
 
     onProgress?.(
       'aggregate-search',
@@ -176,7 +179,7 @@ export class ResearchAgentService {
     onProgress?.('merge', 'Merging and synthesizing findings', 58);
 
     const { mergedResponse, mergedShortSummary } = await this.mergeResponsesAgent(
-      requestText,
+      contextText,
       searchAgentResponses,
     );
 
@@ -311,6 +314,52 @@ Then:
         searchKeywords: fallbackKeywords,
       };
     }
+  }
+
+  private buildContextText(rawIdea: string, memory?: DirectionAiMemory | null): string {
+    if (!memory) return rawIdea;
+
+    const lines: string[] = [];
+    
+    // Project profile
+    if (memory.project) {
+      lines.push(`PROJECT PROFILE:`);
+      if (memory.project.name) lines.push(`- Name: ${memory.project.name}`);
+      if (memory.project.category) lines.push(`- Category: ${memory.project.category}`);
+      if (memory.project.description) lines.push(`- Description: ${memory.project.description}`);
+      if (memory.project.businessType) lines.push(`- Business Type: ${memory.project.businessType}`);
+      if (memory.project.audience) lines.push(`- Target Audience: ${memory.project.audience}`);
+      if (memory.project.objective) lines.push(`- Objective: ${memory.project.objective}`);
+    }
+
+    // Q&A conversation
+    const qaPairs = memory.conversation?.filter(
+      (c, i, arr) => c.kind === 'clarification' || c.kind === 'reply'
+    );
+    if (qaPairs.length > 0) {
+      lines.push(`\nUSER Q&A CONTEXT:`);
+      for (const item of qaPairs) {
+        lines.push(`- [${item.role}]: ${item.content.substring(0, 200)}`);
+      }
+    }
+
+    // Pending questions
+    if (memory.pendingQuestions?.length > 0) {
+      lines.push(`\nPENDING QUESTIONS: ${memory.pendingQuestions.join(', ')}`);
+    }
+
+    // Other agent summaries
+    const otherSummaries = Object.entries(memory.agentSummaries || {})
+      .filter(([key]) => key !== 'RESEARCH')
+      .map(([key, summary]) => `${key}: ${summary.substring(0, 200)}`);
+    if (otherSummaries.length > 0) {
+      lines.push(`\nOTHER AGENT RESULTS:`);
+      lines.push(...otherSummaries);
+    }
+
+    lines.push(`\nORIGINAL IDEA: ${rawIdea}`);
+
+    return lines.join('\n');
   }
 
   private generateFallbackKeywords(
