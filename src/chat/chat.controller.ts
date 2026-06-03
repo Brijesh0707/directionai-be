@@ -9,15 +9,19 @@ import {
   Req,
   Sse,
   UnauthorizedException,
+  Res,
   UseGuards,
+  StreamableFile,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
+import type { Response } from 'express';
 import { map, Observable } from 'rxjs';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthUser } from '../auth/types/auth-user.type';
 import { ChatService } from './chat.service';
 import { CreateChatDto } from './dto/create-chat.dto';
+import { DownloadReportDto } from './dto/download-report.dto';
 import { ListSessionSummariesDto } from './dto/list-session-summaries.dto';
 import { RunAgentsDto } from './dto/run-agents.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
@@ -102,6 +106,28 @@ export class ChatController {
     @Param('runId') runId: string,
   ) {
     return this.chatService.getRunResult(req.user.sub, chatId, runId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('sessions/:chatId/reports/:runId/download')
+  async downloadReport(
+    @Req() req: Request & { user: AuthUser },
+    @Param('chatId') chatId: string,
+    @Param('runId') runId: string,
+    @Body() dto: DownloadReportDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { buffer, fileName } = await this.chatService.downloadReport(
+      req.user.sub,
+      chatId,
+      runId,
+      dto.html,
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+    return new StreamableFile(buffer);
   }
 
   @Sse('sessions/:chatId/stream')

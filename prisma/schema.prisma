@@ -31,6 +31,12 @@ enum AgentRunStatus {
   failed
 }
 
+enum RazorpayOrderStatus {
+  created
+  paid
+  failed
+}
+
 model User {
   id                 String       @id @default(auto()) @map("_id") @db.ObjectId
   email              String       @unique
@@ -52,6 +58,8 @@ model User {
   updatedAt          DateTime     @updatedAt
 
   chatSessions       ChatSession[]
+  razorpayOrders     RazorpayOrder[]
+  passwordResetOtps   PasswordResetOtp[]
 }
 
 model ChatSession {
@@ -187,4 +195,61 @@ model AiModelAudit {
   @@index([finalProvider])
   @@index([status])
   @@index([createdAt])
+}
+
+model BugReport {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String?  @db.ObjectId
+  message     String
+  attachmentUrl String?
+  status      String   @default("open")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RazorpayOrder {
+  id            String               @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String               @db.ObjectId
+  planCode      String
+  planName      String
+  amountInr     Int
+  amountPaise   Int
+  projects      Int
+  receipt       String               @unique
+  orderId       String               @unique
+  paymentId     String?              @unique
+  signature     String?
+  status        RazorpayOrderStatus  @default(created)
+  paidAt        DateTime?
+  errorMessage  String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  user          User                 @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model PasswordResetOtp {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  email       String
+  otpHash     String
+  attempts    Int      @default(0)
+  expiresAt   DateTime
+  verifiedAt  DateTime?
+  usedAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+  @@index([expiresAt])
 }

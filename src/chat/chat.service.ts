@@ -16,6 +16,7 @@ import type {
 } from '../agent/types/directionai-memory.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListSessionSummariesDto } from './dto/list-session-summaries.dto';
+import { ReportPdfService } from './report-pdf.service';
 
 export type ChatStreamEvent = {
   type: 'session' | 'agent';
@@ -36,6 +37,7 @@ export class ChatService {
     private readonly prisma: PrismaService,
     private readonly agentService: AgentService,
     private readonly directionAiAgent: DirectionAiAgentService,
+    private readonly reportPdfService: ReportPdfService,
   ) {}
 
   private getStream(chatId: string): Subject<ChatStreamEvent> {
@@ -471,6 +473,47 @@ export class ChatService {
     return run;
   }
 
+  async downloadReport(
+    userId: string,
+    chatId: string,
+    runId: string,
+    html: string,
+  ) {
+    const session = await this.getSession(userId, chatId);
+
+    const run = await this.prisma.agentRun.findUnique({
+      where: { id: runId },
+      select: {
+        id: true,
+        chatSessionId: true,
+        agentType: true,
+        reportName: true,
+        status: true,
+      },
+    });
+
+    if (!run || run.chatSessionId !== chatId) {
+      throw new NotFoundException('Run not found');
+    }
+
+    if (run.status !== AgentRunStatus.completed) {
+      throw new BadRequestException('Only completed reports can be downloaded');
+    }
+
+    const buffer = await this.reportPdfService.renderLongPagePdf({
+      html,
+    });
+
+    const sanitizedName = this.sanitizeFileName(
+      run.reportName || `${session.title}-${run.agentType}-report`,
+    );
+
+    return {
+      buffer,
+      fileName: `${sanitizedName}.pdf`,
+    };
+  }
+
   async getProjectShare(userId: string, chatId: string) {
     const session = await this.getSession(userId, chatId);
     const reports = await this.prisma.agentRun.findMany({
@@ -720,6 +763,15 @@ export class ChatService {
 
   private buildReportSharePath(token: string): string {
     return `/share/report/${token}`;
+  }
+
+  private sanitizeFileName(value: string): string {
+    return value
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 140)
+      .replace(/\.+$/g, '');
   }
 
   private async promoteProjectReportsToPublic(chatId: string) {

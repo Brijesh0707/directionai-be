@@ -713,9 +713,12 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
     if (!memory) return rawIdea;
 
     const lines: string[] = [];
-    
+
+    lines.push(`RAW SESSION IDEA:`);
+    lines.push(rawIdea);
+
     if (memory.project) {
-      lines.push(`PROJECT PROFILE:`);
+      lines.push(`\nPROJECT PROFILE:`);
       if (memory.project.name) lines.push(`- Name: ${memory.project.name}`);
       if (memory.project.category) lines.push(`- Category: ${memory.project.category}`);
       if (memory.project.description) lines.push(`- Description: ${memory.project.description}`);
@@ -738,15 +741,29 @@ Context:\n${JSON.stringify({ categorized, slides: mappedSlides.map((s) => s.type
       lines.push(`\nPENDING QUESTIONS: ${memory.pendingQuestions.join(', ')}`);
     }
 
-    const otherSummaries = Object.entries(memory.agentSummaries || {})
-      .filter(([key]) => key !== 'PPT')
-      .map(([key, summary]) => `${key}: ${summary.substring(0, 200)}`);
-    if (otherSummaries.length > 0) {
-      lines.push(`\nOTHER AGENT RESULTS:`);
-      lines.push(...otherSummaries);
-    }
+    const preferredSummaryOrder = ['RESEARCH', 'MARKETING', 'DEVELOPMENT'];
+    const allSummaries = Object.entries(memory.agentSummaries || {})
+      .filter(([key]) => key !== 'PPT' && Boolean(key));
 
-    lines.push(`\nORIGINAL IDEA: ${rawIdea}`);
+    const orderedSummaries = [
+      ...preferredSummaryOrder,
+      ...allSummaries.map(([key]) => key).filter((key) => !preferredSummaryOrder.includes(key)),
+    ]
+      .filter((agentType, index, self) => self.indexOf(agentType) === index)
+      .map((agentType) => {
+        const summary = memory.agentSummaries?.[agentType];
+        return summary ? { agentType, summary } : null;
+      })
+      .filter((item): item is { agentType: string; summary: string } => Boolean(item));
+
+    if (orderedSummaries.length > 0) {
+      lines.push(`\nPRIORITY AGENT SUMMARIES:`);
+      for (const item of orderedSummaries) {
+        lines.push(`### ${item.agentType}`);
+        lines.push(item.summary.substring(0, 600));
+        lines.push('');
+      }
+    }
 
     return lines.join('\n');
   }

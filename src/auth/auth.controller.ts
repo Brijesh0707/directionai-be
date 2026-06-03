@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Headers,
   Get,
   HttpCode,
   HttpStatus,
@@ -9,14 +10,17 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { AuthService } from './auth.service';
+import { CreateRazorpayOrderDto } from './dto/create-razorpay-order.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { LoginDto } from './dto/login.dto';
 import { OnboardingDto } from './dto/onboarding.dto';
-import { PurchasePlanDto } from './dto/purchase-plan.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
+import { VerifyRazorpayPaymentDto } from './dto/verify-razorpay-payment.dto';
+import { ForgotPasswordRequestDto } from './dto/forgot-password-request.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthUser } from './types/auth-user.type';
 
@@ -53,6 +57,18 @@ export class AuthController {
     return this.authService.logout(dto.refreshToken);
   }
 
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password/request')
+  requestPasswordReset(@Body() dto: ForgotPasswordRequestDto) {
+    return this.authService.requestPasswordReset(dto.email);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password/reset')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPasswordWithOtp(dto);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me')
   me(@Req() req: Request & { user: AuthUser }) {
@@ -73,7 +89,22 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('plans/purchase')
-  purchasePlan(@Req() req: Request & { user: AuthUser }, @Body() dto: PurchasePlanDto) {
-    return this.authService.purchasePlan(req.user.sub, dto.planCode);
+  purchasePlan(@Req() req: Request & { user: AuthUser }, @Body() dto: CreateRazorpayOrderDto) {
+    return this.authService.createRazorpayOrder(req.user.sub, dto.planCode);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('plans/verify')
+  verifyPlan(@Req() req: Request & { user: AuthUser }, @Body() dto: VerifyRazorpayPaymentDto) {
+    return this.authService.verifyRazorpayPayment(req.user.sub, dto);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('razorpay/webhook')
+  handleRazorpayWebhook(
+    @Req() req: Request,
+    @Headers('x-razorpay-signature') signature?: string,
+  ) {
+    return this.authService.handleRazorpayWebhook(req.body, signature);
   }
 }

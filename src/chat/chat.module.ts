@@ -5,10 +5,11 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AgentModule } from '../agent/agent.module';
 import { AuthModule } from '../auth/auth.module';
 import { PublicShareController } from './public-share.controller';
+import { ReportPdfService } from './report-pdf.service';
 
 @Module({
   imports: [PrismaModule, AgentModule, AuthModule],
   controllers: [ChatController, PublicShareController],
-  providers: [ChatService],
+  providers: [ChatService, ReportPdfService],
 })
 export class ChatModule {}

@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import * as express from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -14,6 +15,10 @@ async function bootstrap() {
       forbidUnknownValues: false,
     }),
   );
+
+  app.use('/auth/razorpay/webhook', express.raw({ type: 'application/json' }));
+  app.use(express.json({ limit: '20mb' }));
+  app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
   app.enableCors({
     origin: [
